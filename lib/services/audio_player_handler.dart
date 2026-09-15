@@ -150,6 +150,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
         title: v.title,
         artist: v.channel,
         artUri: artUri,
+        duration: v.duration != null ? Duration(seconds: v.duration!) : null,
       ));
     }
     super.queue.add(items);
@@ -161,7 +162,12 @@ class AudioPlayerHandler extends BaseAudioHandler {
   void _updateMediaItem(int index) {
     final q = super.queue.value;
     if (q.isNotEmpty && index >= 0 && index < q.length) {
-      mediaItem.add(q[index]);
+      var item = q[index];
+      final dur = player.duration;
+      if (dur != null && dur > Duration.zero) {
+        item = item.copyWith(duration: dur);
+      }
+      mediaItem.add(item);
     }
   }
 

@@ -326,7 +326,7 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Widget _progressStyle(ThemeProvider theme) {
-    final labels = const ['Fina', 'Gruesa', 'Redonda', 'Mínima', 'Gradiente', 'Glow', 'Puntos', 'Anillo', 'Revelar', 'Neón', 'Ondas'];
+    final labels = const ['Fina', 'Gruesa', 'Redonda', 'Mínima', 'Gradiente', 'Glow', 'Puntos', 'Anillo', 'Revelar', 'Neón', 'Ondas', 'Cómic'];
     return Column(
       children: [
         Wrap(

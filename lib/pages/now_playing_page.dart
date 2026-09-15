@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -609,16 +610,34 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   Widget _artworkContent(BuildContext context, LocalSong? song, YouTubeVideo? ytVideo, double size,
       {Color? fallback}) {
-    // YouTube: usar la miniatura del video
+    // YouTube: descargar thumbnail y extraer colores
     if (ytVideo != null && ytVideo.thumb.isNotEmpty) {
-      return Image.network(
-        ytVideo.thumb,
-        fit: BoxFit.cover,
-        width: size,
-        height: size,
-        filterQuality: FilterQuality.high,
-        gaplessPlayback: true,
-        errorBuilder: (_, _, _) => Icon(Icons.music_note, size: size * 0.3, color: context.read<ThemeProvider>().isDarkMode ? Colors.white24 : Colors.black26),
+      return FutureBuilder<Uint8List>(
+        future: _downloadThumb(ytVideo.thumb),
+        builder: (context, snap) {
+          if (snap.hasData && snap.data != null) {
+            _extractColorsFromArtwork(snap.data!, context);
+            return Image.memory(snap.data!,
+                fit: BoxFit.cover,
+                width: size,
+                height: size,
+                filterQuality: FilterQuality.high,
+                gaplessPlayback: true);
+          }
+          return Image.network(
+            ytVideo.thumb,
+            fit: BoxFit.cover,
+            width: size,
+            height: size,
+            filterQuality: FilterQuality.high,
+            gaplessPlayback: true,
+            errorBuilder: (_, _, _) => Icon(Icons.music_note,
+                size: size * 0.3,
+                color: context.read<ThemeProvider>().isDarkMode
+                    ? Colors.white24
+                    : Colors.black26),
+          );
+        },
       );
     }
     // Local: usar la carátula del álbum
@@ -644,6 +663,29 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   // Cache para no re-extraer el mismo artwork
   static Uint8List? _lastArtworkBytes;
+  static String _lastThumbUrl = '';
+  static Uint8List? _lastThumbBytes;
+
+  Future<Uint8List> _downloadThumb(String url) async {
+    if (url == _lastThumbUrl && _lastThumbBytes != null) return _lastThumbBytes!;
+    try {
+      final client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 8);
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close().timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final bytes = await response.fold<List<int>>(
+          <int>[],
+          (prev, chunk) => prev..addAll(chunk),
+        );
+        final result = Uint8List.fromList(bytes);
+        _lastThumbUrl = url;
+        _lastThumbBytes = result;
+        return result;
+      }
+    } catch (_) {}
+    return Uint8List(0);
+  }
 
   void _extractColorsFromArtwork(Uint8List bytes, BuildContext context) {
     if (bytes == _lastArtworkBytes) return;
@@ -928,6 +970,12 @@ class _NowPlayingPageState extends State<NowPlayingPage>
               player.seek(Duration(milliseconds: (v * duration).round()));
             }
           },
+        );
+        break;
+      case ProgressBarStyle.comic:
+        slider = _ComicProgressBar(
+          progress: progress,
+          accent: accent,
         );
         break;
     }
@@ -1878,4 +1926,114 @@ class _WaveBarPainter extends CustomPainter {
       oldDelegate.progress != progress ||
       oldDelegate.time != time ||
       oldDelegate.amplitude != amplitude;
+}
+
+/// Barra de progreso estilo Cómic: panel con bordes negros, halftone y thumb con "!".
+class _ComicProgressBar extends StatelessWidget {
+  final double progress;
+  final Color accent;
+  const _ComicProgressBar({
+    required this.progress,
+    required this.accent,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final h = 28.0;
+        return CustomPaint(
+          size: Size(w, h),
+          painter: _ComicBarPainter(
+            progress: progress,
+            accent: accent,
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ComicBarPainter extends CustomPainter {
+  final double progress;
+  final Color accent;
+  _ComicBarPainter({required this.progress, required this.accent});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final r = const Radius.circular(6);
+
+    // Fondo del panel
+    final bgPaint = Paint()..color = const Color(0xFF1A1A2E);
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), r), bgPaint);
+
+    // Halftone dots (textura comic)
+    final dotPaint = Paint()..color = Colors.white.withValues(alpha: 0.06);
+    for (double dx = 6; dx < w; dx += 12) {
+      for (double dy = 6; dy < h; dy += 12) {
+        canvas.drawCircle(Offset(dx, dy), 1.2, dotPaint);
+      }
+    }
+
+    // Barra de progreso
+    final progressW = w * progress.clamp(0.0, 1.0);
+    if (progressW > 0) {
+      final progressPaint = Paint()..color = accent;
+      final progressRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, 0, progressW, h), r);
+      canvas.drawRRect(progressRect, progressPaint);
+
+      // Halftone dots encima del progreso (invertidos)
+      final invDotPaint = Paint()..color = Colors.white.withValues(alpha: 0.15);
+      for (double dx = 6; dx < progressW; dx += 12) {
+        for (double dy = 6; dy < h; dy += 12) {
+          canvas.drawCircle(Offset(dx, dy), 1.2, invDotPaint);
+        }
+      }
+    }
+
+    // Bordes negros gruesos (estilo comic)
+    final borderPaint = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5;
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), r), borderPaint);
+
+    // Thumb con "!"
+    final thumbX = progressW.clamp(8.0, w - 8.0);
+    final thumbY = h / 2;
+
+    // Sombra del thumb
+    final shadowPaint = Paint()..color = Colors.black54;
+    canvas.drawCircle(Offset(thumbX + 1, thumbY + 1), 9, shadowPaint);
+
+    // Círculo blanco
+    final thumbBg = Paint()..color = Colors.white;
+    canvas.drawCircle(Offset(thumbX, thumbY), 9, thumbBg);
+
+    // Borde negro del thumb
+    final thumbBorder = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5;
+    canvas.drawCircle(Offset(thumbX, thumbY), 9, thumbBorder);
+
+    // "!" en el centro
+    final tp = TextPainter(text: TextSpan(
+      text: '!',
+      style: TextStyle(
+        color: accent,
+        fontSize: 14,
+        fontWeight: FontWeight.w900,
+      ),
+    ), textDirection: TextDirection.ltr);
+    tp.layout();
+    tp.paint(canvas, Offset(thumbX - tp.width / 2, thumbY - tp.height / 2));
+  }
+
+  @override
+  bool shouldRepaint(_ComicBarPainter old) => old.progress != progress || old.accent != accent;
 }

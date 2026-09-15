@@ -8,11 +8,13 @@ class YouTubeVideo {
   final String title;
   final String channel;
   final String thumb;
+  final int? duration;
   const YouTubeVideo({
     required this.videoId,
     required this.title,
     required this.channel,
     required this.thumb,
+    this.duration,
   });
 
   String get embedUrl => 'https://www.youtube.com/embed/$videoId?autoplay=1';

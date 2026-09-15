@@ -6,7 +6,7 @@ import 'package:hive/hive.dart';
 import 'melodia_colors.dart';
 
 /// Estilos disponibles para la barra de progreso de la canción.
-enum ProgressBarStyle { thin, thick, rounded, minimal, gradient, glow, dots, ring, reveal, neon, wave }
+enum ProgressBarStyle { thin, thick, rounded, minimal, gradient, glow, dots, ring, reveal, neon, wave, comic }
 
 /// Paleta de colores para el estilo "Revelar".
 class RevealPalette {
