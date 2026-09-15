@@ -976,6 +976,12 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         slider = _ComicProgressBar(
           progress: progress,
           accent: accent,
+          isPlaying: player.playing,
+          onChanged: (v) {
+            if (duration > 0) {
+              player.seek(Duration(milliseconds: (v * duration).round()));
+            }
+          },
         );
         break;
     }
@@ -1928,13 +1934,18 @@ class _WaveBarPainter extends CustomPainter {
       oldDelegate.amplitude != amplitude;
 }
 
-/// Barra de progreso estilo Cómic: panel con bordes negros, halftone y thumb con "!".
+/// Barra de progreso estilo Cómic: panel interactivo con speed lines, halftone
+/// y borde jagged.
 class _ComicProgressBar extends StatelessWidget {
   final double progress;
   final Color accent;
+  final bool isPlaying;
+  final ValueChanged<double> onChanged;
   const _ComicProgressBar({
     required this.progress,
     required this.accent,
+    required this.isPlaying,
+    required this.onChanged,
   });
 
   @override
@@ -1942,12 +1953,23 @@ class _ComicProgressBar extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth;
-        final h = 28.0;
-        return CustomPaint(
-          size: Size(w, h),
-          painter: _ComicBarPainter(
-            progress: progress,
-            accent: accent,
+        final h = 32.0;
+        return GestureDetector(
+          onHorizontalDragUpdate: (d) {
+            final v = (d.localPosition.dx / w).clamp(0.0, 1.0);
+            onChanged(v);
+          },
+          onTapDown: (d) {
+            final v = (d.localPosition.dx / w).clamp(0.0, 1.0);
+            onChanged(v);
+          },
+          child: CustomPaint(
+            size: Size(w, h),
+            painter: _ComicBarPainter(
+              progress: progress,
+              accent: accent,
+              isPlaying: isPlaying,
+            ),
           ),
         );
       },
@@ -1958,82 +1980,204 @@ class _ComicProgressBar extends StatelessWidget {
 class _ComicBarPainter extends CustomPainter {
   final double progress;
   final Color accent;
-  _ComicBarPainter({required this.progress, required this.accent});
+  final bool isPlaying;
+  _ComicBarPainter({
+    required this.progress,
+    required this.accent,
+    required this.isPlaying,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
     final h = size.height;
-    final r = const Radius.circular(6);
+    final progressW = w * progress.clamp(0.0, 1.0);
 
-    // Fondo del panel
-    final bgPaint = Paint()..color = const Color(0xFF1A1A2E);
-    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), r), bgPaint);
+    // ── Sombra del panel (efecto pop-out) ──
+    final shadowPaint = Paint()..color = Colors.black.withValues(alpha: 0.4);
+    final shadowPath = _jaggedBorderPath(w + 2, h + 2, offset: const Offset(2, 3));
+    canvas.drawPath(shadowPath, shadowPaint);
 
-    // Halftone dots (textura comic)
-    final dotPaint = Paint()..color = Colors.white.withValues(alpha: 0.06);
-    for (double dx = 6; dx < w; dx += 12) {
-      for (double dy = 6; dy < h; dy += 12) {
-        canvas.drawCircle(Offset(dx, dy), 1.2, dotPaint);
+    // ── Fondo del panel ──
+    final bgPaint = Paint()..color = const Color(0xFF12121C);
+    final bgPath = _jaggedBorderPath(w, h);
+    canvas.drawPath(bgPath, bgPaint);
+
+    // ── Halftone dots (textura comic — más grande y variado) ──
+    for (double dx = 4; dx < w; dx += 10) {
+      for (double dy = 4; dy < h; dy += 10) {
+        // Dots más grandes cerca del borde del progreso
+        final distToProgress = (dx - progressW).abs();
+        final dotSize = distToProgress < 20 ? 2.2 : 1.4;
+        final alpha = distToProgress < 20 ? 0.12 : 0.06;
+        final dotPaint = Paint()..color = Colors.white.withValues(alpha: alpha);
+        canvas.drawCircle(Offset(dx, dy), dotSize, dotPaint);
       }
     }
 
-    // Barra de progreso
-    final progressW = w * progress.clamp(0.0, 1.0);
+    // ── Barra de progreso ──
     if (progressW > 0) {
-      final progressPaint = Paint()..color = accent;
-      final progressRect = RRect.fromRectAndRadius(
-        Rect.fromLTWH(0, 0, progressW, h), r);
-      canvas.drawRRect(progressRect, progressPaint);
+      // Fill con gradiente
+      final progressRect = Rect.fromLTWH(0, 0, progressW, h);
+      final gradientPaint = Paint()
+        ..shader = LinearGradient(
+          colors: [accent, accent.withValues(alpha: 0.8)],
+        ).createShader(progressRect);
+      final progressPath = _jaggedBorderPath(w, h);
+      canvas.save();
+      canvas.clipRect(Rect.fromLTWH(0, 0, progressW, h));
+      canvas.drawPath(progressPath, gradientPaint);
+      canvas.restore();
 
-      // Halftone dots encima del progreso (invertidos)
-      final invDotPaint = Paint()..color = Colors.white.withValues(alpha: 0.15);
-      for (double dx = 6; dx < progressW; dx += 12) {
-        for (double dy = 6; dy < h; dy += 12) {
-          canvas.drawCircle(Offset(dx, dy), 1.2, invDotPaint);
+      // Halftone invertido dentro del progreso
+      for (double dx = 4; dx < progressW; dx += 10) {
+        for (double dy = 4; dy < h; dy += 10) {
+          final dotPaint = Paint()..color = Colors.white.withValues(alpha: 0.18);
+          canvas.drawCircle(Offset(dx, dy), 1.8, dotPaint);
         }
       }
     }
 
-    // Bordes negros gruesos (estilo comic)
+    // ── Speed lines detrás del thumb (estilo manga) ──
+    if (progressW > 12) {
+      final thumbX = progressW.clamp(12.0, w - 12.0);
+      final thumbY = h / 2;
+      final linePaint = Paint()
+        ..color = Colors.black
+        ..strokeWidth = 1.8
+        ..strokeCap = StrokeCap.round;
+
+      final lineAngles = [-0.35, -0.18, -0.06, 0.06, 0.18, 0.35];
+      final lineLengths = [10.0, 14.0, 10.0, 10.0, 14.0, 10.0];
+      final lineStartX = thumbX - 14;
+
+      for (int i = 0; i < lineAngles.length; i++) {
+        final angle = lineAngles[i];
+        final len = lineLengths[i];
+        final startX = lineStartX - (i % 2 == 0 ? 4 : 0);
+        final endX = startX - len;
+        final dy = len * angle;
+        canvas.drawLine(
+          Offset(startX, thumbY + dy),
+          Offset(endX, thumbY + dy * 1.5),
+          linePaint,
+        );
+      }
+    }
+
+    // ── Borde jagged negro (estilo panel de cómic) ──
     final borderPaint = Paint()
       ..color = Colors.black
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5;
-    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), r), borderPaint);
+      ..strokeWidth = 2.8;
+    final borderPath = _jaggedBorderPath(w, h);
+    canvas.drawPath(borderPath, borderPaint);
 
-    // Thumb con "!"
-    final thumbX = progressW.clamp(8.0, w - 8.0);
+    // ── Thumb: círculo blanco con borde negro y estrella de impacto ──
+    final thumbX = progressW.clamp(12.0, w - 12.0);
     final thumbY = h / 2;
+    final thumbR = 10.0;
 
-    // Sombra del thumb
-    final shadowPaint = Paint()..color = Colors.black54;
-    canvas.drawCircle(Offset(thumbX + 1, thumbY + 1), 9, shadowPaint);
+    // Glow sutil del accent
+    final glowPaint = Paint()
+      ..color = accent.withValues(alpha: 0.35)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+    canvas.drawCircle(Offset(thumbX, thumbY), thumbR + 4, glowPaint);
 
     // Círculo blanco
     final thumbBg = Paint()..color = Colors.white;
-    canvas.drawCircle(Offset(thumbX, thumbY), 9, thumbBg);
+    canvas.drawCircle(Offset(thumbX, thumbY), thumbR, thumbBg);
 
     // Borde negro del thumb
     final thumbBorder = Paint()
       ..color = Colors.black
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5;
-    canvas.drawCircle(Offset(thumbX, thumbY), 9, thumbBorder);
+      ..strokeWidth = 2.8;
+    canvas.drawCircle(Offset(thumbX, thumbY), thumbR, thumbBorder);
 
-    // "!" en el centro
-    final tp = TextPainter(text: TextSpan(
-      text: '!',
-      style: TextStyle(
-        color: accent,
-        fontSize: 14,
-        fontWeight: FontWeight.w900,
-      ),
-    ), textDirection: TextDirection.ltr);
-    tp.layout();
-    tp.paint(canvas, Offset(thumbX - tp.width / 2, thumbY - tp.height / 2));
+    // Punto de acento en el centro
+    final dotCenter = Paint()..color = accent;
+    canvas.drawCircle(Offset(thumbX, thumbY), 3.5, dotCenter);
+
+    // ── Mini estrella de impacto en la esquina superior derecha ──
+    final starX = thumbX + 7;
+    final starY = thumbY - 7;
+    final starPaint = Paint()..color = accent;
+    _drawMiniStar(canvas, starX, starY, 4.0, starPaint);
+  }
+
+  /// Genera un Path con borde jagged (dientes de sierra) estilo cómic.
+  Path _jaggedBorderPath(double w, double h, {Offset offset = Offset.zero}) {
+    final path = Path();
+    final teethH = 2.0;
+    final teethW = 6.0;
+    final top = offset.dy;
+    final left = offset.dx;
+
+    // Top edge (dientes hacia arriba)
+    path.moveTo(left, top);
+    for (double x = left; x < left + w; x += teethW) {
+      path.lineTo(x + teethW * 0.5, top - teethH);
+      path.lineTo(x + teethW, top);
+    }
+
+    // Right edge
+    path.lineTo(left + w, top + h);
+
+    // Bottom edge (dientes hacia abajo)
+    for (double x = left + w; x > left; x -= teethW) {
+      path.lineTo(x - teethW * 0.5, top + h + teethH);
+      path.lineTo(x - teethW, top + h);
+    }
+
+    path.close();
+    return path;
+  }
+
+  /// Dibuja una mini estrella de 4 puntas.
+  void _drawMiniStar(Canvas canvas, double cx, double cy, double r, Paint paint) {
+    final path = Path();
+    final inner = r * 0.35;
+    for (int i = 0; i < 4; i++) {
+      final angle = i * 3.14159 / 2;
+      final outerX = cx + r * _cos(angle);
+      final outerY = cy + r * _sin(angle);
+      final midAngle = angle + 3.14159 / 4;
+      final midX = cx + inner * _cos(midAngle);
+      final midY = cy + inner * _sin(midAngle);
+      if (i == 0) {
+        path.moveTo(outerX, outerY);
+      } else {
+        path.lineTo(outerX, outerY);
+      }
+      path.lineTo(midX, midY);
+    }
+    path.close();
+    canvas.drawPath(path, paint);
+  }
+
+  double _cos(double a) {
+    // Simple cosine for 0, pi/2, pi, 3pi/2
+    final normalized = a % (2 * 3.14159);
+    if (normalized < 0.01 || (normalized - 2 * 3.14159).abs() < 0.01) return 1.0;
+    if ((normalized - 3.14159 / 2).abs() < 0.01) return 0.0;
+    if ((normalized - 3.14159).abs() < 0.01) return -1.0;
+    if ((normalized - 3 * 3.14159 / 2).abs() < 0.01) return 0.0;
+    // Approximate for other angles
+    return _cosApprox(normalized);
+  }
+
+  double _sin(double a) => _cos(a - 3.14159 / 2);
+
+  double _cosApprox(double x) {
+    // Taylor series approximation
+    x = x % (2 * 3.14159);
+    if (x > 3.14159) x -= 2 * 3.14159;
+    final x2 = x * x;
+    return 1.0 - x2 / 2.0 + x2 * x2 / 24.0 - x2 * x2 * x2 / 720.0;
   }
 
   @override
-  bool shouldRepaint(_ComicBarPainter old) => old.progress != progress || old.accent != accent;
+  bool shouldRepaint(_ComicBarPainter old) =>
+      old.progress != progress || old.accent != accent || old.isPlaying != isPlaying;
 }
