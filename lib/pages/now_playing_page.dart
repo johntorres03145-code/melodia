@@ -266,7 +266,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             width: 140,
             height: 3,
             child: LinearProgressIndicator(
-              backgroundColor: MelodiaColors.surfaceRaised,
+              backgroundColor: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
               color: theme.effectiveAccent.withValues(alpha: 0.5),
             ),
           ),
@@ -618,7 +618,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         height: size,
         filterQuality: FilterQuality.high,
         gaplessPlayback: true,
-        errorBuilder: (_, _, _) => Icon(Icons.music_note, size: size * 0.3, color: Colors.white24),
+        errorBuilder: (_, _, _) => Icon(Icons.music_note, size: size * 0.3, color: context.read<ThemeProvider>().isDarkMode ? Colors.white24 : Colors.black26),
       );
     }
     // Local: usar la carátula del álbum
@@ -634,12 +634,12 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                 filterQuality: FilterQuality.high,
                 gaplessPlayback: true);
           }
-          return Icon(Icons.music_note, size: size * 0.3, color: Colors.white24);
+          return Icon(Icons.music_note, size: size * 0.3, color: context.read<ThemeProvider>().isDarkMode ? Colors.white24 : Colors.black26);
         },
       );
     }
     // Sin nada
-    return Icon(Icons.music_note, size: size * 0.3, color: Colors.white24);
+    return Icon(Icons.music_note, size: size * 0.3, color: context.read<ThemeProvider>().isDarkMode ? Colors.white24 : Colors.black26);
   }
 
   // Cache para no re-extraer el mismo artwork
@@ -1051,7 +1051,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: MelodiaColors.surfaceRaised,
+                color: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
@@ -1097,7 +1097,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: MelodiaColors.surfaceRaised,
+                color: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(

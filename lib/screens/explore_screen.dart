@@ -135,7 +135,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                         },
                       ),
                 isDense: true,
-                fillColor: MelodiaColors.surfaceRaised,
+                fillColor: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -274,17 +274,17 @@ class _ExploreScreenState extends State<ExploreScreen> {
                           errorBuilder: (_, _, _) => Container(
                             width: 110,
                             height: 70,
-                            color: MelodiaColors.surfaceRaised,
-                            child: const Icon(Icons.queue_music,
-                                color: Colors.white38, size: 28),
-                          ),
-                        )
+                          color: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
+                          child: Icon(Icons.queue_music,
+                              color: theme.isDarkMode ? Colors.white38 : Colors.black38, size: 28),
+                        ),
+                      )
                       : Container(
                           width: 110,
                           height: 70,
-                          color: MelodiaColors.surfaceRaised,
-                          child: const Icon(Icons.queue_music,
-                              color: Colors.white38, size: 28),
+                          color: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
+                          child: Icon(Icons.queue_music,
+                              color: theme.isDarkMode ? Colors.white38 : Colors.black38, size: 28),
                         ),
                 ),
                   Container(
@@ -337,17 +337,17 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     errorBuilder: (_, _, _) => Container(
                       width: 72,
                       height: 72,
-                      color: Colors.white10,
-                      child: const Icon(Icons.play_circle,
-                          color: Colors.white38, size: 28),
+                      color: theme.isDarkMode ? Colors.white10 : Colors.black12,
+                      child: Icon(Icons.play_circle,
+                          color: theme.isDarkMode ? Colors.white38 : Colors.black38, size: 28),
                     ),
                   )
                 : Container(
                     width: 72,
                     height: 72,
-                    color: Colors.white10,
-                    child: const Icon(Icons.play_circle,
-                        color: Colors.white38, size: 28),
+                    color: theme.isDarkMode ? Colors.white10 : Colors.black12,
+                    child: Icon(Icons.play_circle,
+                        color: theme.isDarkMode ? Colors.white38 : Colors.black38, size: 28),
                   ),
             if (isLoading)
               Container(

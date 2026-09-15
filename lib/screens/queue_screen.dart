@@ -166,17 +166,17 @@ class QueueScreen extends StatelessWidget {
                           errorBuilder: (_, _, _) => Container(
                             width: 44,
                             height: 44,
-                            color: Colors.white10,
-                            child: const Icon(Icons.music_note,
-                                color: Colors.white38, size: 18),
+                            color: context.read<ThemeProvider>().isDarkMode ? Colors.white10 : Colors.black12,
+                            child: Icon(Icons.music_note,
+                                color: context.read<ThemeProvider>().isDarkMode ? Colors.white38 : Colors.black38, size: 18),
                           ),
                         )
                       : Container(
                           width: 44,
                           height: 44,
-                          color: Colors.white10,
-                          child: const Icon(Icons.music_note,
-                              color: Colors.white38, size: 18),
+                          color: context.read<ThemeProvider>().isDarkMode ? Colors.white10 : Colors.black12,
+                          child: Icon(Icons.music_note,
+                              color: context.read<ThemeProvider>().isDarkMode ? Colors.white38 : Colors.black38, size: 18),
                         ),
                 ),
           title: video.title,

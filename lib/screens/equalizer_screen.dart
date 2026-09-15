@@ -25,6 +25,9 @@ const kEqualizerPresets = <EqualizerPreset>[
   EqualizerPreset(name: 'Clásica', icon: Icons.theater_comedy, gains: [0.4, 0.2, -0.3, 0.2, 0.4]),
   EqualizerPreset(name: 'Bass Boost', icon: Icons.surround_sound, gains: [0.8, 0.4, 0.1, -0.1, -0.2]),
   EqualizerPreset(name: 'Agudos', icon: Icons.graphic_eq, gains: [-0.2, -0.1, 0.1, 0.4, 0.7]),
+  EqualizerPreset(name: 'Voz', icon: Icons.record_voice_over, gains: [-0.3, 0.2, 0.6, 0.4, -0.1]),
+  EqualizerPreset(name: 'Baile', icon: Icons.nightlife, gains: [0.6, 0.3, -0.1, 0.2, 0.5]),
+  EqualizerPreset(name: 'Relajante', icon: Icons.spa, gains: [0.2, 0.1, -0.2, -0.1, -0.3]),
 ];
 
 class EqualizerScreen extends StatefulWidget {
@@ -135,6 +138,31 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                 ),
               const SizedBox(height: 16),
 
+              // ── Mejora de sonido (LoudnessEnhancer) ──
+              Row(
+                children: [
+                  Icon(Icons.hearing, color: accent, size: 22),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Mejorar sonido',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: textColor)),
+                        Text('Normaliza y amplifica el volumen',
+                            style: TextStyle(fontSize: 11, color: secondary)),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: player.soundEnhancement,
+                    onChanged: (v) => player.setSoundEnhancement(v),
+                    activeColor: accent,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
               // ── Presets ──
               Opacity(
                 opacity: theme.equalizerEnabled ? 1.0 : 0.4,
@@ -163,7 +191,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                         decoration: BoxDecoration(
                           color: selected
                               ? accent.withValues(alpha: 0.2)
-                              : MelodiaColors.surfaceRaised,
+                              : MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: selected ? accent : Colors.transparent,
@@ -245,7 +273,7 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: MelodiaColors.surfaceRaised,
+                  color: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(

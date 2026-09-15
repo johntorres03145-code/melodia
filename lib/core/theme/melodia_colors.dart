@@ -19,9 +19,19 @@ abstract final class MelodiaColors {
   static const textSecondary = Color(0xFFA1A1AA);
   static const textInactive = Color(0xFF666672);
 
-  /// Superficies: variaciones muy sutiles de Midnight.
+  /// Superficies: variaciones sutiles según modo.
   static const surfaceBase = Color(0xFF0E131C);
   static const surfaceRaised = Color(0xFF141B26);
+  static const surfaceBaseLight = Color(0xFFF0F0F5);
+  static const surfaceRaisedLight = Color(0xFFFFFFFF);
+
+  /// Superficie base mode-aware.
+  static Color surfaceBaseFor(bool isDark) =>
+      isDark ? surfaceBase : surfaceBaseLight;
+
+  /// Superficie elevada mode-aware.
+  static Color surfaceRaisedFor(bool isDark) =>
+      isDark ? surfaceRaised : surfaceRaisedLight;
 
   /// Violeta → Magenta (identidad).
   static const linearGradientMain = LinearGradient(

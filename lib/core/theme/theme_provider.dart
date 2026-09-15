@@ -307,7 +307,13 @@ class ThemeProvider extends ChangeNotifier {
 
   Future<void> toggleDarkMode(bool value) async {
     _isDarkMode = value;
+    if (value) {
+      _backgroundColor = MelodiaColors.midnight;
+    } else {
+      _backgroundColor = const Color(0xFFFAFAFA);
+    }
     await _box.put('isDarkMode', value);
+    await _box.put('backgroundColor', _backgroundColor.toARGB32());
     notifyListeners();
   }
 

@@ -131,7 +131,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                       prefixIcon: const Icon(Icons.search, size: 20),
                       isDense: true,
                       filled: true,
-                      fillColor: MelodiaColors.surfaceRaised,
+                      fillColor: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -760,9 +760,8 @@ class _LibraryScreenState extends State<LibraryScreen>
                                 width: 40,
                                 height: 40,
                                 decoration: BoxDecoration(
-                                  color: MelodiaColors.surfaceRaised,
-                                  borderRadius:
-                                      BorderRadius.circular(8),
+                                  color: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Icon(Icons.queue_music,
                                     color: accent, size: 20),
@@ -893,12 +892,12 @@ class _LibraryScreenState extends State<LibraryScreen>
                               return Image.memory(snap.data,
                                   width: 80, height: 80, fit: BoxFit.cover);
                             }
-                            return const Icon(Icons.person,
-                                color: Colors.white70, size: 30);
+                            return Icon(Icons.person,
+                                color: theme.isDarkMode ? Colors.white70 : Colors.black54, size: 30);
                           },
                         )
-                      : const Icon(Icons.person,
-                          color: Colors.white70, size: 30),
+                      : Icon(Icons.person,
+                          color: theme.isDarkMode ? Colors.white70 : Colors.black54, size: 30),
                 ),
               ),
               const SizedBox(height: 8),
@@ -985,14 +984,14 @@ class _LibraryScreenState extends State<LibraryScreen>
                                 width: double.infinity,
                                 height: 130);
                           }
-                          return const Center(
+                          return Center(
                               child: Icon(Icons.library_music,
-                                  size: 36, color: Colors.white70));
+                                  size: 36, color: theme.isDarkMode ? Colors.white70 : Colors.black54));
                         },
                       )
-                    : const Center(
+                    : Center(
                         child: Icon(Icons.library_music,
-                            size: 36, color: Colors.white70)),
+                            size: 36, color: theme.isDarkMode ? Colors.white70 : Colors.black54)),
               ),
               const SizedBox(height: 8),
               Text(
@@ -1027,7 +1026,7 @@ class _LibraryScreenState extends State<LibraryScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: MelodiaColors.surfaceRaised,
+          color: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
@@ -1039,8 +1038,8 @@ class _LibraryScreenState extends State<LibraryScreen>
                 borderRadius: BorderRadius.circular(10),
                 gradient: MelodiaColors.linearGradientMain,
               ),
-              child: const Icon(Icons.queue_music,
-                  color: Colors.white70, size: 20),
+              child: Icon(Icons.queue_music,
+                  color: theme.isDarkMode ? Colors.white70 : Colors.black54, size: 20),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -1266,7 +1265,7 @@ class _PlaylistPickerSheet extends StatelessWidget {
                             width: 40,
                             height: 40,
                             decoration: BoxDecoration(
-                              color: MelodiaColors.surfaceRaised,
+                              color: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(Icons.queue_music,

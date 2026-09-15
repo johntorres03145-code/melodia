@@ -6,6 +6,7 @@ import 'package:just_audio/just_audio.dart';
 import '../services/audio_player_handler.dart';
 import '../services/youtube_audio_service.dart';
 import '../services/youtube_search.dart';
+import '../services/yt_url_cache.dart';
 import 'play_history_model.dart';
 import 'song.dart';
 
@@ -21,7 +22,10 @@ class PlayerModel extends ChangeNotifier {
   AudioPlayerHandler? _handler;
   final PlayHistoryModel? _playHistory;
   final YouTubeAudioService _ytAudioService = YouTubeAudioService();
+  final YtUrlCache _ytUrlCache = YtUrlCache();
   AndroidEqualizer? _equalizer;
+  AndroidLoudnessEnhancer? _loudnessEnhancer;
+  bool _soundEnhancement = false;
 
   // ── Crossfade ──
   int _crossfadeSecs = 0;
@@ -104,13 +108,30 @@ class PlayerModel extends ChangeNotifier {
     return ni;
   }
 
-  PlayerModel({AudioPlayer? player, this._playHistory, AndroidEqualizer? equalizer})
-      : _player = player ?? AudioPlayer(),
-        _equalizer = equalizer {
+  PlayerModel({
+    AudioPlayer? player,
+    this._playHistory,
+    AndroidEqualizer? equalizer,
+    AndroidLoudnessEnhancer? loudnessEnhancer,
+  })  : _player = player ?? AudioPlayer(),
+        _equalizer = equalizer,
+        _loudnessEnhancer = loudnessEnhancer {
     _setupListeners();
+    _ytUrlCache.init();
   }
 
   AndroidEqualizer? get equalizer => _equalizer;
+  AndroidLoudnessEnhancer? get loudnessEnhancer => _loudnessEnhancer;
+  bool get soundEnhancement => _soundEnhancement;
+
+  void setSoundEnhancement(bool enabled) {
+    _soundEnhancement = enabled;
+    _loudnessEnhancer?.setEnabled(enabled);
+    if (enabled) {
+      _loudnessEnhancer?.setTargetGain(3.0);
+    }
+    notifyListeners();
+  }
 
   void _setupListeners() {
     _stateSub?.cancel();
@@ -277,14 +298,7 @@ class PlayerModel extends ChangeNotifier {
     notifyListeners();
 
     _ytIndex = index;
-
-    if (_ytAudioSources[index] == null) {
-      final url = await _ytAudioService.getAudioUrl(_ytQueue[index].videoId);
-      if (url != null) {
-        _ytAudioSources[index] =
-            AudioSource.uri(Uri.parse(url), tag: 'yt_${_ytQueue[index].videoId}');
-      }
-    }
+    await _resolveYtSource(index);
 
     _syncCurrentToHandler();
     if (_ytAudioSources[index] != null) {
@@ -295,6 +309,7 @@ class PlayerModel extends ChangeNotifier {
 
     _isLoadingYouTube = false;
     notifyListeners();
+    _prefetchNextYouTube();
   }
 
   /// Getter de la cola local.
@@ -347,12 +362,15 @@ class PlayerModel extends ChangeNotifier {
     _isLoadingYouTube = true;
     notifyListeners();
 
+    await _resolveYtSource(startIndex);
     await _loadYouTubeCurrent();
     _position = Duration.zero;
     _player.play();
 
     _isLoadingYouTube = false;
     notifyListeners();
+
+    _prefetchNextYouTube();
   }
 
   Future<void> _loadYouTubeCurrent() async {
@@ -360,14 +378,36 @@ class PlayerModel extends ChangeNotifier {
     final source = _ytAudioSources[_ytIndex];
     if (source == null) {
       debugPrint('No hay stream de audio para: ${_ytQueue[_ytIndex].title}');
+      _skipFailedYouTube();
       return;
     }
     try {
-      await _player.setAudioSource(source);
+      await _player.setAudioSource(source).timeout(const Duration(seconds: 8));
     } catch (e) {
       debugPrint('No pude cargar YouTube: ${_ytQueue[_ytIndex].title} — $e');
+      _ytAudioSources[_ytIndex] = null;
+      _skipFailedYouTube();
+      return;
     }
     _syncCurrentToHandler();
+  }
+
+  void _skipFailedYouTube() {
+    final idx = _nextYtIndex();
+    if (idx >= 0) {
+      debugPrint('Saltando canción fallida → siguiente ($idx)');
+      Future.microtask(() => next());
+    } else if (_repeat == PlayerRepeatMode.all) {
+      debugPrint('Repetición total, reiniciando cola');
+      Future.microtask(() {
+        _ytIndex = 0;
+        _loadYouTubeCurrent().then((_) => _player.play());
+      });
+    } else {
+      debugPrint('No hay más canciones, manteniendo servicio activo');
+      _position = Duration.zero;
+      notifyListeners();
+    }
   }
 
 
@@ -402,20 +442,23 @@ class PlayerModel extends ChangeNotifier {
         await _player.seek(Duration.zero, index: 0);
         _player.play();
       } else {
-        _player.pause();
         await _player.seek(Duration.zero);
+        _position = Duration.zero;
+        notifyListeners();
       }
     } else {
       final idx = _nextYtIndex();
       if (idx < 0) {
         if (_repeat == PlayerRepeatMode.all) {
           _ytIndex = 0;
+          await _resolveYtSource(0);
           await _loadYouTubeCurrent();
           _position = Duration.zero;
           _player.play();
         } else {
-          _player.pause();
           await _player.seek(Duration.zero);
+          _position = Duration.zero;
+          notifyListeners();
         }
         return;
       }
@@ -424,13 +467,7 @@ class PlayerModel extends ChangeNotifier {
       notifyListeners();
 
       _ytIndex = idx;
-
-      if (_ytAudioSources[idx] == null) {
-        final url = await _ytAudioService.getAudioUrl(_ytQueue[idx].videoId);
-        if (url != null) {
-          _ytAudioSources[idx] = AudioSource.uri(Uri.parse(url), tag: 'yt_${_ytQueue[idx].videoId}');
-        }
-      }
+      await _resolveYtSource(idx);
 
       _syncCurrentToHandler();
       if (_ytAudioSources[idx] != null) {
@@ -441,6 +478,7 @@ class PlayerModel extends ChangeNotifier {
 
       _isLoadingYouTube = false;
       notifyListeners();
+      _prefetchNextYouTube();
     }
   }
 
@@ -464,13 +502,7 @@ class PlayerModel extends ChangeNotifier {
       notifyListeners();
 
       _ytIndex = idx;
-
-      if (_ytAudioSources[idx] == null) {
-        final url = await _ytAudioService.getAudioUrl(_ytQueue[idx].videoId);
-        if (url != null) {
-          _ytAudioSources[idx] = AudioSource.uri(Uri.parse(url), tag: 'yt_${_ytQueue[idx].videoId}');
-        }
-      }
+      await _resolveYtSource(idx);
 
       _syncCurrentToHandler();
       if (_ytAudioSources[idx] != null) {
@@ -511,6 +543,45 @@ class PlayerModel extends ChangeNotifier {
     if (currentIdx >= 0 && _shuffleOrder.isNotEmpty) {
       _shuffleOrder.remove(currentIdx);
       _shuffleOrder.insert(0, currentIdx);
+    }
+  }
+
+  Future<void> _resolveYtSource(int index) async {
+    if (index < 0 || index >= _ytQueue.length) return;
+    if (_ytAudioSources[index] != null) return;
+
+    final videoId = _ytQueue[index].videoId;
+
+    final cached = _ytUrlCache.get(videoId);
+    if (cached != null) {
+      _ytAudioSources[index] =
+          AudioSource.uri(Uri.parse(cached), tag: 'yt_$videoId');
+      debugPrint('YtPrefetch: cache HIT para $videoId');
+      return;
+    }
+
+    final url = await _ytAudioService.getAudioUrl(videoId);
+    if (url != null) {
+      _ytAudioSources[index] =
+          AudioSource.uri(Uri.parse(url), tag: 'yt_$videoId');
+      _ytUrlCache.put(videoId, url);
+    }
+  }
+
+  void _prefetchNextYouTube() {
+    if (_source != TrackSource.youtube) return;
+    for (int offset = 1; offset <= 2; offset++) {
+      final idx = _ytIndex + offset;
+      if (idx >= 0 && idx < _ytQueue.length && _ytAudioSources[idx] == null) {
+        final vid = _ytQueue[idx].videoId;
+        final cached = _ytUrlCache.get(vid);
+        if (cached != null) {
+          _ytAudioSources[idx] =
+              AudioSource.uri(Uri.parse(cached), tag: 'yt_$vid');
+          continue;
+        }
+        _resolveYtSource(idx).catchError((_) {});
+      }
     }
   }
 
@@ -681,6 +752,7 @@ class PlayerModel extends ChangeNotifier {
     _uiUpdateTimer?.cancel();
     _cancelCrossfade();
     _ytAudioService.dispose();
+    _ytUrlCache.close();
     _player.dispose();
     super.dispose();
   }

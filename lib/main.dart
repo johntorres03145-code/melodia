@@ -63,20 +63,24 @@ Future<void> main() async {
   if (themeProvider.equalizerEnabled) {
     equalizer.setEnabled(true);
   }
-  final pipeline = AudioPipeline(androidAudioEffects: [equalizer]);
+  final loudnessEnhancer = AndroidLoudnessEnhancer();
+  final pipeline = AudioPipeline(
+    androidAudioEffects: [equalizer, loudnessEnhancer],
+  );
   final player = AudioPlayer(audioPipeline: pipeline);
   final playerModel = PlayerModel(
     player: player,
     playHistory: playHistory,
     equalizer: equalizer,
+    loudnessEnhancer: loudnessEnhancer,
   );
   final audioHandler = await AudioService.init(
     builder: () => AudioPlayerHandler(player: player, model: playerModel),
     config: AudioServiceConfig(
       androidNotificationChannelId: 'com.melodia.channel.audio',
       androidNotificationChannelName: 'Reproducción',
-      androidNotificationOngoing: false,
-      androidStopForegroundOnPause: true,
+      androidNotificationOngoing: true,
+      androidStopForegroundOnPause: false,
     ),
   );
   playerModel.attachHandler(audioHandler);

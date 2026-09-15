@@ -99,7 +99,7 @@ class ProfileScreen extends StatelessWidget {
             shape: BoxShape.circle,
             gradient: MelodiaColors.linearGradientMain,
           ),
-          child: const Icon(Icons.person, size: 34, color: Colors.white70),
+          child: Icon(Icons.person, size: 34, color: theme.isDarkMode ? Colors.white70 : Colors.black54),
         ),
         const SizedBox(width: 16),
         Column(
@@ -163,7 +163,7 @@ class ProfileScreen extends StatelessWidget {
                   color: isSelected ? Colors.black : MelodiaColors.textSecondary,
                 ),
                 side: BorderSide.none,
-                backgroundColor: MelodiaColors.surfaceRaised,
+                backgroundColor: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
               );
             },
           ),
@@ -190,7 +190,7 @@ class ProfileScreen extends StatelessWidget {
                   color: isSelected ? Colors.black : MelodiaColors.textSecondary,
                 ),
                 side: BorderSide.none,
-                backgroundColor: MelodiaColors.surfaceRaised,
+                backgroundColor: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
               );
             },
           ),
@@ -208,6 +208,7 @@ class ProfileScreen extends StatelessWidget {
           _colorDot(
             color: color,
             selected: theme.effectiveAccent == color,
+            isDark: theme.isDarkMode,
             onTap: () => theme.setAccentColor(color),
           ),
       ],
@@ -225,6 +226,7 @@ class ProfileScreen extends StatelessWidget {
           _colorDot(
             color: color,
             selected: theme.backgroundColor == color,
+            isDark: theme.isDarkMode,
             onTap: () => theme.setBackgroundColor(color),
           ),
       ],
@@ -234,6 +236,7 @@ class ProfileScreen extends StatelessWidget {
   Widget _colorDot({
     required Color color,
     required bool selected,
+    required bool isDark,
     required VoidCallback onTap,
   }) {
     return GestureDetector(
@@ -245,7 +248,7 @@ class ProfileScreen extends StatelessWidget {
           color: color,
           shape: BoxShape.circle,
           border: Border.all(
-            color: selected ? Colors.white : Colors.white24,
+            color: selected ? Colors.white : (isDark ? Colors.white24 : Colors.black26),
             width: selected ? 2.5 : 1,
           ),
         ),
@@ -343,7 +346,7 @@ class ProfileScreen extends StatelessWidget {
                       : MelodiaColors.textSecondary,
                 ),
                 selectedColor: theme.effectiveAccent,
-                backgroundColor: MelodiaColors.surfaceRaised,
+                backgroundColor: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                 side: BorderSide.none,
               ),
           ],
@@ -377,7 +380,7 @@ class ProfileScreen extends StatelessWidget {
               color: selected ? Colors.black : MelodiaColors.textSecondary,
             ),
             selectedColor: p.colors.first,
-            backgroundColor: MelodiaColors.surfaceRaised,
+            backgroundColor: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
             side: BorderSide.none,
           );
         },
@@ -479,7 +482,7 @@ class ProfileScreen extends StatelessWidget {
               decoration: BoxDecoration(
                 color: selected
                     ? theme.effectiveAccent.withValues(alpha: 0.2)
-                    : MelodiaColors.surfaceRaised,
+                    : MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: selected
@@ -665,12 +668,12 @@ class _CollapsibleCardState extends State<_CollapsibleCard>
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       decoration: BoxDecoration(
-        color: MelodiaColors.surfaceBase,
+        color: MelodiaColors.surfaceBaseFor(theme.isDarkMode),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: _expanded
               ? accent.withValues(alpha: 0.3)
-              : MelodiaColors.surfaceRaised,
+              : MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
           width: 1,
         ),
       ),

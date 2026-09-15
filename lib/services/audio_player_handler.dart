@@ -59,15 +59,13 @@ class AudioPlayerHandler extends BaseAudioHandler {
   void _startPeriodicRefresh() {
     _periodicTimer?.cancel();
     _periodicTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (player.playing) {
-        _notifyPlaybackState(
-          controls: _controls,
-          processingState: _mapProcessing(player.processingState),
-          playing: true,
-          updatePosition: player.position,
-          bufferedPosition: player.bufferedPosition,
-        );
-      }
+      _notifyPlaybackState(
+        controls: _controls,
+        processingState: _mapProcessing(player.processingState),
+        playing: player.playing,
+        updatePosition: player.position,
+        bufferedPosition: player.bufferedPosition,
+      );
     });
   }
 

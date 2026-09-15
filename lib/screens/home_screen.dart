@@ -275,7 +275,7 @@ class _ForYouCarousel extends StatelessWidget {
                               if (snap.hasData && snap.data != null) {
                                 return Image.memory(snap.data, fit: BoxFit.cover);
                               }
-                              return const Icon(Icons.music_note, size: 40, color: Colors.white24);
+                              return Icon(Icons.music_note, size: 40, color: theme.isDarkMode ? Colors.white24 : Colors.black26);
                             },
                           ),
                           // Play / Pause button
@@ -396,7 +396,7 @@ class _AlbumGrid extends StatelessWidget {
                         if (snap.hasData && snap.data != null) {
                           return Image.memory(snap.data, fit: BoxFit.cover);
                         }
-                        return const Icon(Icons.album, size: 40, color: Colors.white24);
+                         return Icon(Icons.album, size: 40, color: theme.isDarkMode ? Colors.white24 : Colors.black26);
                       },
                     ),
                   ),
@@ -420,7 +420,7 @@ class _AlbumGrid extends StatelessWidget {
   void _showAlbumSheet(BuildContext context, _AlbumGroup album, PlayerModel player) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: MelodiaColors.surfaceBase,
+      backgroundColor: MelodiaColors.surfaceBaseFor(theme.isDarkMode),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -438,7 +438,7 @@ class _AlbumGrid extends StatelessWidget {
                   width: 36,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.white24,
+                    color: theme.isDarkMode ? Colors.white24 : Colors.black26,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -500,7 +500,7 @@ class _RecentlyPlayed extends StatelessWidget {
               width: 240,
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: MelodiaColors.surfaceRaised,
+                color: MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -516,8 +516,8 @@ class _RecentlyPlayed extends StatelessWidget {
                         return Container(
                           width: 48,
                           height: 48,
-                          color: Colors.white10,
-                          child: const Icon(Icons.music_note, color: Colors.white38, size: 22),
+                          color: theme.isDarkMode ? Colors.white10 : Colors.black12,
+                          child: Icon(Icons.music_note, color: theme.isDarkMode ? Colors.white38 : Colors.black38, size: 22),
                         );
                       },
                     ),
@@ -571,10 +571,11 @@ class _EmptyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = context.watch<ThemeProvider>();
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: MelodiaColors.surfaceBase,
+        color: MelodiaColors.surfaceBaseFor(theme.isDarkMode),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
@@ -597,7 +598,7 @@ class _EmptyHome extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
-        color: MelodiaColors.surfaceBase,
+        color: MelodiaColors.surfaceBaseFor(theme.isDarkMode),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
@@ -626,7 +627,7 @@ class _HomeError extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: MelodiaColors.surfaceBase,
+        color: MelodiaColors.surfaceBaseFor(theme.isDarkMode),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
@@ -661,7 +662,7 @@ class _StatsPreview extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: MelodiaColors.surfaceBase,
+        color: MelodiaColors.surfaceBaseFor(theme.isDarkMode),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
