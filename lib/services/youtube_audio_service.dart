@@ -2,49 +2,67 @@ import 'package:flutter/foundation.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 /// Servicio que obtiene URLs de audio de YouTube.
-/// Intenta muxed (tag 18) primero por confiabilidad; fallback a audio-only.
+/// Intenta múltiples clientes InnerTube con fallback; timeout de 15s.
 class YouTubeAudioService {
   final YoutubeExplode _yt = YoutubeExplode();
 
-  /// Busca la mejor URL de audio disponible.
+  /// Clientes InnerTube en orden de prioridad.
+  /// android y androidSdkless no requieren deciphering.
+  static final _clients = [
+    YoutubeApiClient.androidSdkless,
+    YoutubeApiClient.ios,
+    YoutubeApiClient.safari,
+    YoutubeApiClient.tv,
+    YoutubeApiClient.mweb,
+  ];
+
+  /// Busca la mejor URL de audio con fallback multi-cliente.
   Future<String?> _findWorkingUrl(String videoId) async {
-    final manifest = await _yt.videos.streamsClient.getManifest(videoId);
+    for (final client in _clients) {
+      try {
+        debugPrint('YouTubeAudioService: intentando cliente ${client.apiUrl.split('/').last}');
+        final manifest = await _yt.videos.streamsClient
+            .getManifest(videoId, ytClients: [client])
+            .timeout(const Duration(seconds: 15));
 
-    // ── 1. Intentar muxed (tag 18, 360p) — más confiable ──
-    final muxedStreams = manifest.muxed;
-    if (muxedStreams.isNotEmpty) {
-      final tag18 = muxedStreams.where((s) => s.tag == 18).toList();
-      if (tag18.isNotEmpty) {
-        final url = tag18.first.url.toString();
-        debugPrint('YouTubeAudioService: muxed tag 18 OK');
-        return url;
+        // ── 1. Intentar muxed (tag 18, 360p) — más confiable ──
+        final muxedStreams = manifest.muxed;
+        if (muxedStreams.isNotEmpty) {
+          final tag18 = muxedStreams.where((s) => s.tag == 18).toList();
+          if (tag18.isNotEmpty) {
+            final url = tag18.first.url.toString();
+            debugPrint('YouTubeAudioService: muxed tag 18 OK via ${client.apiUrl.split('/').last}');
+            return url;
+          }
+          final url = muxedStreams.first.url.toString();
+          debugPrint('YouTubeAudioService: muxed fallback tag=${muxedStreams.first.tag}');
+          return url;
+        }
+
+        // ── 2. Fallback: audio-only (M4A/AAC tag 140) ──
+        final audioStreams = manifest.audioOnly;
+        if (audioStreams.isNotEmpty) {
+          final m4a = audioStreams
+              .where((s) => s.container == StreamContainer.mp4 || s.tag == 140)
+              .toList();
+          final candidates = m4a.isNotEmpty ? m4a : audioStreams.sortByBitrate();
+
+          final url = candidates.last.url.toString();
+          debugPrint('YouTubeAudioService: audio-only tag=${candidates.last.tag}');
+          return url;
+        }
+      } catch (e) {
+        debugPrint('YouTubeAudioService: cliente ${client.apiUrl.split('/').last} falló: $e');
       }
-      // Si no hay tag 18, usar el primero disponible
-      final url = muxedStreams.first.url.toString();
-      debugPrint('YouTubeAudioService: muxed fallback tag=${muxedStreams.first.tag}');
-      return url;
     }
 
-    // ── 2. Fallback: audio-only (M4A/AAC tag 140) ──
-    final audioStreams = manifest.audioOnly;
-    if (audioStreams.isNotEmpty) {
-      final m4a = audioStreams
-          .where((s) => s.container == StreamContainer.mp4 || s.tag == 140)
-          .toList();
-      final candidates = m4a.isNotEmpty ? m4a : audioStreams.sortByBitrate();
-
-      final url = candidates.last.url.toString();
-      debugPrint('YouTubeAudioService: audio-only tag=${candidates.last.tag}');
-      return url;
-    }
-
-    debugPrint('YouTubeAudioService: no se encontró stream para $videoId');
+    debugPrint('YouTubeAudioService: TODOS los clientes fallaron para $videoId');
     return null;
   }
 
   /// Obtiene la URL del audio de YouTube con reintentos rápidos.
   Future<String?> getAudioUrl(String videoId) async {
-    for (var attempt = 1; attempt <= 3; attempt++) {
+    for (var attempt = 1; attempt <= 2; attempt++) {
       try {
         debugPrint('YouTubeAudioService: intento $attempt para $videoId');
         final url = await _findWorkingUrl(videoId);
@@ -53,7 +71,7 @@ class YouTubeAudioService {
         return url;
       } catch (e) {
         debugPrint('YouTubeAudioService: intento $attempt falló: $e');
-        if (attempt < 3) {
+        if (attempt < 2) {
           await Future.delayed(const Duration(milliseconds: 500));
         }
       }

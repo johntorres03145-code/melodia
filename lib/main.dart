@@ -67,7 +67,7 @@ Future<void> main() async {
   final pipeline = AudioPipeline(
     androidAudioEffects: [equalizer, loudnessEnhancer],
   );
-  final player = AudioPlayer(audioPipeline: pipeline);
+  final player = AudioPlayer(audioPipeline: pipeline, useProxyForRequestHeaders: false);
   final playerModel = PlayerModel(
     player: player,
     playHistory: playHistory,

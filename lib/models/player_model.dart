@@ -113,7 +113,7 @@ class PlayerModel extends ChangeNotifier {
     this._playHistory,
     AndroidEqualizer? equalizer,
     AndroidLoudnessEnhancer? loudnessEnhancer,
-  })  : _player = player ?? AudioPlayer(),
+  })  : _player = player ?? AudioPlayer(useProxyForRequestHeaders: false),
         _equalizer = equalizer,
         _loudnessEnhancer = loudnessEnhancer {
     _setupListeners();
@@ -651,8 +651,8 @@ class PlayerModel extends ChangeNotifier {
     }
 
     final nextPlayer = newEqualizer != null
-        ? AudioPlayer(audioPipeline: AudioPipeline(androidAudioEffects: [newEqualizer]))
-        : AudioPlayer();
+        ? AudioPlayer(audioPipeline: AudioPipeline(androidAudioEffects: [newEqualizer]), useProxyForRequestHeaders: false)
+        : AudioPlayer(useProxyForRequestHeaders: false);
     _crossfadeNextPlayer = nextPlayer;
     try {
       debugPrint('[CROSSFADE] Loading next song...');

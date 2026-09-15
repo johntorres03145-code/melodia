@@ -22,7 +22,7 @@ dependencies:
   # Búsqueda + reproducción oficial de YouTube (streaming, no descarga).
   # `youtube_player_flutter` se incorporará en el hito H4 (trae
   # flutter_inappwebview y rompe el build con el AGP actual en este hito).
-  youtube_explode_dart: ^2.3.5
+  youtube_explode_dart: ^3.1.0
   http: ^1.2.1
   url_launcher: ^6.2.5
   webview_flutter: ^4.8.0
