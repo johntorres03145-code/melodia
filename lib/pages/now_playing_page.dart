@@ -243,7 +243,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   Widget _skeletonTitle(ThemeProvider theme) {
-    final textColor = theme.isDarkMode ? MelodiaColors.whiteSoft : Colors.black87;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
@@ -1408,7 +1407,6 @@ class _AnimatedHeartState extends State<_AnimatedHeart>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
   late Animation<double> _scaleAnim;
-  late Animation<Color?> _colorAnim;
 
   @override
   void initState() {
