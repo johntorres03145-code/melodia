@@ -41,6 +41,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   String? _lastLyricsKey;
   final Map<int, Future<dynamic>> _artworkFutures = {};
   final ScrollController _lyricsScrollController = ScrollController();
+  String? _frozenArtworkSongId;
 
   @override
   void initState() {
@@ -69,6 +70,14 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     final theme = context.watch<ThemeProvider>();
     final song = player.current;
     final ytVideo = player.currentYouTube;
+
+    // Durante crossfade: congelar artwork en la canción vieja para evitar flicker
+    if (player.isCrossfading) {
+      _frozenArtworkSongId ??= song != null ? 'local_${song.id}'
+          : ytVideo != null ? 'yt_${ytVideo.videoId}' : null;
+    } else {
+      _frozenArtworkSongId = null;
+    }
 
     // Buscar letras cuando cambia la canción (fuera del build)
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -629,6 +638,21 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   Widget _artworkContent(BuildContext context, LocalSong? song, YouTubeVideo? ytVideo, double size,
       {Color? fallback}) {
+    // Durante crossfade: buscar la canción vieja en la cola para no cambiar portada
+    LocalSong? artworkSong = song;
+    if (_frozenArtworkSongId != null) {
+      final player = context.read<PlayerModel>();
+      if (player.isCrossfading) {
+        artworkSong = null;
+        for (final s in player.queue) {
+          if ('local_${s.id}' == _frozenArtworkSongId) {
+            artworkSong = s;
+            break;
+          }
+        }
+      }
+    }
+
     // YouTube: descargar thumbnail y extraer colores
     if (ytVideo != null && ytVideo.thumb.isNotEmpty) {
       return FutureBuilder<Uint8List>(
@@ -660,15 +684,15 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       );
     }
     // Local: usar la carátula del álbum
-    if (song != null) {
-      _artworkFutures.putIfAbsent(song.id, () =>
-          context.read<LibraryModel>().songArtworkFor(song.id, albumId: song.albumId));
+    if (artworkSong != null) {
+      _artworkFutures.putIfAbsent(artworkSong.id, () =>
+          context.read<LibraryModel>().songArtworkFor(artworkSong!.id, albumId: artworkSong.albumId));
       return FutureBuilder<dynamic>(
-        future: _artworkFutures[song.id],
+        future: _artworkFutures[artworkSong.id],
         builder: (context, snap) {
           if (snap.hasData && snap.data != null) {
             final bytes = snap.data as Uint8List;
-            _extractColorsFromArtwork('local_${song.id}', bytes, context);
+            _extractColorsFromArtwork('local_${artworkSong!.id}', bytes, context);
             return Image.memory(bytes, fit: BoxFit.cover,
                 width: size, height: size,
                 filterQuality: FilterQuality.high,
@@ -1101,16 +1125,13 @@ class _NowPlayingPageState extends State<NowPlayingPage>
               size: 26),
           onPressed: player.toggleShuffle,
         ),
-        // Retroceder 10 segundos
-        IconButton(
-          icon: Icon(Icons.replay_10_rounded, size: 28, color: iconColor),
-          onPressed: () => player.seek(
-            Duration(milliseconds: (player.position.inMilliseconds - 10000).clamp(0, player.duration.inMilliseconds)),
+        _LongPressSeekButton(
+          icon: Icons.skip_previous_rounded,
+          iconColor: iconColor,
+          onLongPress: () => player.seek(
+            Duration(milliseconds: (player.position.inMilliseconds - 1000).clamp(0, player.duration.inMilliseconds)),
           ),
-        ),
-        IconButton(
-          icon: Icon(Icons.skip_previous_rounded, size: 32, color: iconColor),
-          onPressed: player.previous,
+          onTap: player.previous,
         ),
         Container(
           width: 64, height: 64,
@@ -1123,16 +1144,13 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             onPressed: player.togglePlay,
           ),
         ),
-        IconButton(
-          icon: Icon(Icons.skip_next_rounded, size: 32, color: iconColor),
-          onPressed: player.next,
-        ),
-        // Adelantar 10 segundos
-        IconButton(
-          icon: Icon(Icons.forward_10_rounded, size: 28, color: iconColor),
-          onPressed: () => player.seek(
-            Duration(milliseconds: (player.position.inMilliseconds + 10000).clamp(0, player.duration.inMilliseconds)),
+        _LongPressSeekButton(
+          icon: Icons.skip_next_rounded,
+          iconColor: iconColor,
+          onLongPress: () => player.seek(
+            Duration(milliseconds: (player.position.inMilliseconds + 1000).clamp(0, player.duration.inMilliseconds)),
           ),
+          onTap: player.next,
         ),
         IconButton(
           icon: Icon(repeatIcon, color: repeatColor, size: 26),
