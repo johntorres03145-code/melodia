@@ -15,6 +15,8 @@ import '../models/library_model.dart';
 import '../models/player_model.dart';
 import '../models/song.dart';
 import '../screens/equalizer_screen.dart';
+import '../screens/album_detail_screen.dart';
+import '../screens/artist_detail_screen.dart';
 import '../screens/queue_screen.dart';
 import '../widgets/animated_equalizer_icon.dart';
 import '../widgets/chord_panel.dart';
@@ -37,6 +39,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   List<LyricLine>? _lyrics;
   bool _showLyrics = false;
   String? _lastLyricsKey;
+  final Map<int, Future<dynamic>> _artworkFutures = {};
 
   @override
   void initState() {
@@ -641,8 +644,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     }
     // Local: usar la carátula del álbum
     if (song != null) {
+      _artworkFutures.putIfAbsent(song.id, () =>
+          context.read<LibraryModel>().songArtworkFor(song.id, albumId: song.albumId));
       return FutureBuilder<dynamic>(
-        future: context.read<LibraryModel>().songArtworkFor(song.id, albumId: song.albumId),
+        future: _artworkFutures[song.id],
         builder: (context, snap) {
           if (snap.hasData && snap.data != null) {
             final bytes = snap.data as Uint8List;
@@ -775,24 +780,48 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       padding: const EdgeInsets.symmetric(horizontal: 32),
       child: Column(
         children: [
-          Text(
-            _currentTitle(song, ytVideo),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
-              color: textColor,
+          GestureDetector(
+            onTap: () {
+              if (song != null && song.albumId != null) {
+                final songs = context.read<LibraryModel>().songs;
+                final albumSongs = songs.where((s) => s.albumId == song.albumId).toList();
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => AlbumDetailScreen(albumName: song.album, songs: albumSongs, albumId: song.albumId!),
+                ));
+              }
+            },
+            child: Text(
+              _currentTitle(song, ytVideo),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+                decoration: song != null ? TextDecoration.underline : TextDecoration.none,
+                decorationColor: textColor.withValues(alpha: 0.3),
+              ),
             ),
           ),
           const SizedBox(height: 6),
-          Text(
-            _currentArtist(song, ytVideo),
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 15, color: MelodiaColors.textSecondary),
+          GestureDetector(
+            onTap: () {
+              if (song != null && song.artist.isNotEmpty) {
+                final songs = context.read<LibraryModel>().songs;
+                final artistSongs = songs.where((s) => s.artist == song.artist).toList();
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ArtistDetailScreen(artistName: song.artist, songs: artistSongs),
+                ));
+              }
+            },
+            child: Text(
+              _currentArtist(song, ytVideo),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, color: MelodiaColors.textSecondary),
+            ),
           ),
           if (song != null) ...[
             const SizedBox(height: 10),
@@ -1161,6 +1190,34 @@ class _NowPlayingPageState extends State<NowPlayingPage>
                   Text(
                     'Cola',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: accent),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          GestureDetector(
+            onTap: player.cycleSpeed,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: player.speed != 1.0
+                    ? accent.withValues(alpha: 0.2)
+                    : MelodiaColors.surfaceRaisedFor(theme.isDarkMode),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.speed, size: 18, color: accent),
+                  const SizedBox(width: 6),
+                  Text(
+                    '${player.speed}x',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: player.speed != 1.0 ? FontWeight.w600 : FontWeight.w500,
+                      color: accent,
+                    ),
                   ),
                 ],
               ),

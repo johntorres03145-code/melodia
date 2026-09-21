@@ -43,6 +43,18 @@ class PlayHistoryModel extends ChangeNotifier {
 
   int getPlayCount(int songId) => _entries[songId]?.playCount ?? 0;
 
+  /// Estima el tiempo total de escucha en segundos, usando duración de cada canción × reproducciones.
+  int getTotalListeningSeconds(List<LocalSong> allSongs) {
+    int totalSeconds = 0;
+    for (final entry in _entries.values) {
+      final song = allSongs.where((s) => s.id == entry.songId).firstOrNull;
+      if (song != null && song.durationMs > 0) {
+        totalSeconds += (song.durationMs ~/ 1000) * entry.playCount;
+      }
+    }
+    return totalSeconds;
+  }
+
   Future<void> init(Box box) async {
     _box = box;
     final raw = _box.get('playHistory', defaultValue: <dynamic>[]) as List;
@@ -83,8 +95,9 @@ class PlayHistoryModel extends ChangeNotifier {
   List<LocalSong> getRecentlyPlayed(List<LocalSong> allSongs, {int limit = 10}) {
     final entries = _entries.values.toList()
       ..sort((a, b) => b.lastPlayed.compareTo(a.lastPlayed));
-    final ids = entries.take(limit).map((e) => e.songId).toSet();
-    return allSongs.where((s) => ids.contains(s.id)).toList();
+    final orderedIds = entries.take(limit).map((e) => e.songId).toList();
+    final songMap = {for (final s in allSongs) s.id: s};
+    return orderedIds.map((id) => songMap[id]).whereType<LocalSong>().toList();
   }
 
   /// Top artistas agrupados por total de reproducciones.

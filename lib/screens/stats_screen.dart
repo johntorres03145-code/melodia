@@ -1,12 +1,9 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/theme/melodia_colors.dart';
 import '../core/theme/theme_provider.dart';
 import '../models/library_model.dart';
-import '../models/player_model.dart';
 import '../models/play_history_model.dart';
 import '../models/song.dart';
 import '../widgets/artwork_thumb.dart';
@@ -30,6 +27,7 @@ class StatsScreen extends StatelessWidget {
 
     final totalPlays = history.all.fold<int>(0, (sum, e) => sum + e.playCount);
     final totalSongs = history.all.length;
+    final totalSeconds = history.getTotalListeningSeconds(songs);
 
     return Scaffold(
       backgroundColor: theme.backgroundColor,
@@ -50,6 +48,7 @@ class StatsScreen extends StatelessWidget {
             _SummaryHeader(
               totalPlays: totalPlays,
               totalSongs: totalSongs,
+              totalSeconds: totalSeconds,
               accent: accent,
               textColor: textColor,
             ),
@@ -116,15 +115,25 @@ class StatsScreen extends StatelessWidget {
 class _SummaryHeader extends StatelessWidget {
   final int totalPlays;
   final int totalSongs;
+  final int totalSeconds;
   final Color accent;
   final Color textColor;
 
   const _SummaryHeader({
     required this.totalPlays,
     required this.totalSongs,
+    required this.totalSeconds,
     required this.accent,
     required this.textColor,
   });
+
+  String _formatDuration(int seconds) {
+    if (seconds < 60) return '${seconds}s';
+    if (seconds < 3600) return '${seconds ~/ 60}m';
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    return '${h}h ${m}m';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -147,7 +156,7 @@ class _SummaryHeader extends StatelessWidget {
         children: [
           _SummaryItem(
             value: '$totalPlays',
-            label: 'Reproducciones',
+            label: 'Repros.',
             accent: accent,
             textColor: textColor,
           ),
@@ -155,6 +164,13 @@ class _SummaryHeader extends StatelessWidget {
           _SummaryItem(
             value: '$totalSongs',
             label: 'Canciones',
+            accent: accent,
+            textColor: textColor,
+          ),
+          Container(width: 1, height: 36, color: accent.withValues(alpha: 0.2)),
+          _SummaryItem(
+            value: _formatDuration(totalSeconds),
+            label: 'Escucha',
             accent: accent,
             textColor: textColor,
           ),

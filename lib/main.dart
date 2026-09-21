@@ -20,6 +20,7 @@ import 'models/playlist_model.dart';
 import 'screens/main_scaffold.dart';
 import 'screens/splash_screen.dart';
 import 'services/audio_player_handler.dart';
+import 'services/youtube_search.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -86,14 +87,19 @@ Future<void> main() async {
   playerModel.attachHandler(audioHandler);
 
   // Sincronizar crossfade con los valores guardados en ThemeProvider.
-  if (themeProvider.crossfadeEnabled) {
-    playerModel.setCrossfadeDuration(themeProvider.crossfadeDuration);
-  }
+  playerModel.setCrossfadeEnabled(themeProvider.crossfadeEnabled, themeProvider.crossfadeDuration);
 
   final libraryModel = LibraryModel();
   libraryModel.init(settingsBox);
   libraryModel.attachPlayHistory(playHistory);
   audioHandler.attachLibrary(libraryModel);
+  audioHandler.attachFavorites(favoritesProvider);
+  audioHandler.attachPlayHistory(playHistory);
+
+  const ytApiKey = String.fromEnvironment('YOUTUBE_API_KEY');
+  if (ytApiKey.isNotEmpty) {
+    audioHandler.attachYouTubeSearch(YouTubeSearch(ytApiKey));
+  }
 
   runApp(MelodiaApp(
     themeProvider: themeProvider,

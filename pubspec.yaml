@@ -44,6 +44,9 @@ dependencies:
   # Permisos (leer archivos de música en el dispositivo)
   permission_handler: ^11.3.1
 
+  # Compartir
+  share_plus: ^10.1.4
+
   # Utilidades de diseño y formato
   font_awesome_flutter: ^10.7.0
   flutter_spinkit: ^5.2.0

@@ -43,12 +43,18 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
   @override
   void initState() {
     super.initState();
-    // Sincronizar el estado del ecualizador al abrir la pantalla.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final theme = context.read<ThemeProvider>();
       final player = context.read<PlayerModel>();
       if (player.equalizer != null) {
         player.equalizer!.setEnabled(theme.equalizerEnabled);
+        // Restaurar gains guardados si existen
+        final savedGains = theme.equalizerGains;
+        player.equalizer!.parameters.then((params) {
+          for (var i = 0; i < params.bands.length && i < savedGains.length; i++) {
+            params.bands[i].setGain(savedGains[i]);
+          }
+        });
       }
     });
   }
@@ -258,6 +264,9 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
                               onChanged: (gain) {
                                 setState(() => _selectedPreset = -1);
                                 bands[i].setGain(gain);
+                                // Guardar todos los gains
+                                final gains = bands.map((b) => b.gain).toList();
+                                context.read<ThemeProvider>().saveEqualizerGains(gains);
                               },
                             );
                           }),
@@ -298,6 +307,8 @@ class _EqualizerScreenState extends State<EqualizerScreen> {
       bands[i].setGain(targetGain);
     }
     setState(() => _selectedPreset = index);
+    final gains = bands.map((b) => b.gain).toList();
+    context.read<ThemeProvider>().saveEqualizerGains(gains);
   }
 }
 

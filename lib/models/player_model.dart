@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../services/audio_player_handler.dart';
@@ -29,10 +30,14 @@ class PlayerModel extends ChangeNotifier {
 
   // ── Crossfade ──
   int _crossfadeSecs = 0;
+  bool _crossfadeEnabled = false;
   bool _isCrossfading = false;
   Timer? _crossfadeTimer;
-  Timer? _uiUpdateTimer;
   AudioPlayer? _crossfadeNextPlayer;
+  bool _crossfadeTriggeredForSong = false;
+
+  // ── Protección de transición ──
+  bool _isSettingSource = false;
 
   // ── Gapless ──
   ConcatenatingAudioSource? _concatSource;
@@ -45,6 +50,7 @@ class PlayerModel extends ChangeNotifier {
 
   // ── Cola local ──
   List<LocalSong> _queue = [];
+  List<LocalSong> _originalQueue = [];
   int _currentIndex = -1;
 
   // ── Cola de YouTube ──
@@ -60,6 +66,10 @@ class PlayerModel extends ChangeNotifier {
   List<int> _shuffleOrder = [];
 
   Duration _position = Duration.zero;
+
+  // ── Velocidad de reproducción ──
+  double _speed = 1.0;
+  static const _speedOptions = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
   // ── Getters públicos ──
 
@@ -86,7 +96,10 @@ class PlayerModel extends ChangeNotifier {
   Duration get position => _position;
   Duration get duration => _player.duration ?? Duration.zero;
   bool get isCrossfading => _isCrossfading;
+  bool get crossfadeEnabled => _crossfadeEnabled;
   bool get isLoadingYouTube => _isLoadingYouTube;
+  double get speed => _speed;
+  List<double> get speedOptions => _speedOptions;
 
   /// Índice de la siguiente canción en la cola (para resaltar en UI).
   int get nextQueueIndex {
@@ -106,6 +119,18 @@ class PlayerModel extends ChangeNotifier {
       return _repeat == PlayerRepeatMode.all ? 0 : -1;
     }
     return ni;
+  }
+
+  /// Índice de la canción anterior en la cola (respeta shuffle).
+  int get prevQueueIndex {
+    final cur = _source == TrackSource.local ? _currentIndex : _ytIndex;
+    if (cur < 0) return -1;
+    if (_shuffle && _shuffleOrder.isNotEmpty) {
+      final pos = _shuffleOrder.indexOf(cur);
+      if (pos <= 0) return -1;
+      return _shuffleOrder[pos - 1];
+    }
+    return cur - 1;
   }
 
   PlayerModel({
@@ -141,6 +166,20 @@ class PlayerModel extends ChangeNotifier {
     _stateSub = _player.playerStateStream.listen((_) => notifyListeners());
     _posSub = _player.positionStream.listen((p) {
       _position = p;
+      // Crossfade: detectar cuando faltan _crossfadeSecs para el final
+      if (_crossfadeEnabled && !_isCrossfading && !_crossfadeTriggeredForSong) {
+        final dur = _player.duration;
+        if (dur != null && dur > Duration.zero && _source == TrackSource.local) {
+          final remaining = dur - p;
+          if (remaining <= Duration(seconds: _crossfadeSecs) && remaining > Duration.zero) {
+            final nextIdx = nextQueueIndex;
+            if (nextIdx >= 0 && nextIdx < _queue.length) {
+              _crossfadeTriggeredForSong = true;
+              _crossfadeTo(_queue[nextIdx]);
+            }
+          }
+        }
+      }
       notifyListeners();
     });
     _processSub = _player.processingStateStream.listen((p) {
@@ -150,9 +189,11 @@ class PlayerModel extends ChangeNotifier {
     });
     _indexSub = _player.currentIndexStream.listen((idx) {
       if (idx == null) return;
+      if (_isCrossfading || _isSettingSource) return;
       if (_source == TrackSource.local && idx >= 0 && idx < _queue.length) {
         final prev = _currentIndex;
         _currentIndex = idx;
+        _crossfadeTriggeredForSong = false;
         if (prev != idx && prev >= 0 && prev < _queue.length) {
           _playHistory?.recordPlay(_queue[prev].id);
         }
@@ -167,6 +208,15 @@ class PlayerModel extends ChangeNotifier {
       if (_currentIndex >= 0 && _currentIndex < _queue.length) {
         _playHistory?.recordPlay(_queue[_currentIndex].id);
       }
+      // Crossfade fallback: si el position stream no lo detectó (canción muy corta)
+      if (_crossfadeEnabled && !_isCrossfading) {
+        final nextIdx = nextQueueIndex;
+        if (nextIdx >= 0 && nextIdx < _queue.length) {
+          _crossfadeTriggeredForSong = true;
+          _crossfadeTo(_queue[nextIdx]);
+          return;
+        }
+      }
     } else if (_source == TrackSource.youtube) {
       next();
       return;
@@ -178,7 +228,22 @@ class PlayerModel extends ChangeNotifier {
     _crossfadeSecs = seconds.clamp(0, 12);
   }
 
+  /// Cicla entre las velocidades de reproducción disponibles.
+  void cycleSpeed() {
+    final idx = _speedOptions.indexOf(_speed);
+    final nextIdx = (idx + 1) % _speedOptions.length;
+    setSpeed(_speedOptions[nextIdx]);
+  }
+
+  /// Establece una velocidad de reproducción específica.
+  void setSpeed(double s) {
+    _speed = s;
+    _player.setSpeed(s);
+    notifyListeners();
+  }
+
   void setCrossfadeEnabled(bool enabled, int duration) {
+    _crossfadeEnabled = enabled;
     _crossfadeSecs = enabled ? duration.clamp(2, 12) : 0;
   }
 
@@ -189,7 +254,7 @@ class PlayerModel extends ChangeNotifier {
 
   void _syncToHandler() {
     if (_source == TrackSource.local) {
-      _handler?.publishQueue(_queue, _currentIndex);
+      _handler?.publishQueue(orderedQueue, _currentIndex);
     } else if (_source == TrackSource.youtube) {
       _handler?.publishYouTubeQueue(_ytQueue, _ytIndex);
     }
@@ -207,44 +272,72 @@ class PlayerModel extends ChangeNotifier {
 
   Future<void> playQueue(List<LocalSong> songs, int startIndex) async {
     if (_isCrossfading) _cancelCrossfade();
+    _isSettingSource = true;
     _source = TrackSource.local;
     _queue = List.of(songs);
+    _originalQueue = List.of(songs);
     _currentIndex = startIndex;
     _ytQueue = [];
     _ytIndex = -1;
+    _crossfadeTriggeredForSong = false;
+
+    // Construir shuffle order si está activo
+    if (_shuffle) {
+      _buildShuffleOrder();
+    } else {
+      _shuffleOrder = [];
+    }
+
     _syncToHandler();
 
-    _concatSource = ConcatenatingAudioSource(
-      children: songs.map((s) => AudioSource.uri(
-        Uri.file(s.path),
-        tag: s.id,
-      )).toList(),
-    );
-
-    if (_shuffle) {
-      _player.setShuffleModeEnabled(true);
+    if (_crossfadeEnabled) {
+      // Crossfade: cargar solo la canción actual (control manual del timing)
+      await _player.setUrl(songs[startIndex].path);
+      _position = Duration.zero;
+      _player.play();
     } else {
-      _player.setShuffleModeEnabled(false);
-    }
+      // Normal: ConcatenatingAudioSource para gapless
+      _concatSource = ConcatenatingAudioSource(
+        children: songs.map((s) => AudioSource.uri(
+          Uri.file(s.path),
+          tag: s.id,
+        )).toList(),
+      );
 
-    switch (_repeat) {
-      case PlayerRepeatMode.off:
-        _player.setLoopMode(LoopMode.off);
-      case PlayerRepeatMode.all:
-        _player.setLoopMode(LoopMode.all);
-      case PlayerRepeatMode.one:
-        _player.setLoopMode(LoopMode.one);
-    }
+      // NO usamos setShuffleModeEnabled: el shuffle se maneja
+      // 100% con _shuffleOrder + nextQueueIndex/prevQueueIndex + seek()
 
-    await _player.setAudioSource(_concatSource!, initialIndex: startIndex);
-    _position = Duration.zero;
-    _player.play();
+      switch (_repeat) {
+        case PlayerRepeatMode.off:
+          _player.setLoopMode(LoopMode.off);
+        case PlayerRepeatMode.all:
+          _player.setLoopMode(LoopMode.all);
+        case PlayerRepeatMode.one:
+          _player.setLoopMode(LoopMode.one);
+      }
+
+      await _player.setAudioSource(_concatSource!, initialIndex: startIndex);
+      _position = Duration.zero;
+      _player.play();
+    }
+    _isSettingSource = false;
   }
 
   /// Agrega una canción al final de la cola actual.
   void addToQueue(LocalSong song) {
     _queue.add(song);
     _concatSource?.add(AudioSource.uri(Uri.file(song.path), tag: song.id));
+    _syncToHandler();
+    notifyListeners();
+  }
+
+  /// Inserta una canción justo después de la actual en la cola.
+  void playNext(LocalSong song) {
+    final insertAt = _currentIndex + 1;
+    _queue.insert(insertAt, song);
+    if (_concatSource != null) {
+      _concatSource!.insert(insertAt, AudioSource.uri(Uri.file(song.path), tag: song.id));
+    }
     _syncToHandler();
     notifyListeners();
   }
@@ -281,13 +374,23 @@ class PlayerModel extends ChangeNotifier {
   /// Salta a una canción específica de la cola.
   void skipToIndex(int index) async {
     if (index < 0 || index >= _queue.length) return;
+    if (_isCrossfading) _cancelCrossfade();
+    _isSettingSource = true;
     _currentIndex = index;
+    _crossfadeTriggeredForSong = false;
     _syncCurrentToHandler();
-    try {
-      await _player.seek(Duration.zero, index: index);
-    } catch (_) {}
-    _position = Duration.zero;
-    _player.play();
+    if (_crossfadeEnabled) {
+      await _player.setUrl(_queue[index].path);
+      _position = Duration.zero;
+      _player.play();
+    } else {
+      try {
+        await _player.seek(Duration.zero, index: index);
+      } catch (_) {}
+      _position = Duration.zero;
+      _player.play();
+    }
+    _isSettingSource = false;
     notifyListeners();
   }
 
@@ -356,7 +459,11 @@ class PlayerModel extends ChangeNotifier {
     _ytAudioSources = audioSources;
     _queue = [];
     _currentIndex = -1;
-    _buildShuffleOrder();
+    if (_shuffle) {
+      _buildShuffleOrder();
+    } else {
+      _shuffleOrder = [];
+    }
     _syncToHandler();
 
     _isLoadingYouTube = true;
@@ -416,6 +523,7 @@ class PlayerModel extends ChangeNotifier {
 
   Future<void> togglePlay() async {
     if (!hasQueue) return;
+    HapticFeedback.mediumImpact();
     if (_player.playing) {
       await _player.pause();
     } else {
@@ -430,21 +538,54 @@ class PlayerModel extends ChangeNotifier {
 
   Future<void> next() async {
     if (!hasQueue) return;
+    HapticFeedback.lightImpact();
     if (_isCrossfading) {
       debugPrint('[CROSSFADE] next() called while crossfading → canceling');
       _cancelCrossfade();
     }
 
     if (_source == TrackSource.local) {
-      if (_player.hasNext) {
-        await _player.seekToNext();
-      } else if (_repeat == PlayerRepeatMode.all) {
-        await _player.seek(Duration.zero, index: 0);
-        _player.play();
-      } else {
-        await _player.seek(Duration.zero);
-        _position = Duration.zero;
+      if (_crossfadeEnabled) {
+        // Crossfade mode: skip manual sin ConcatenatingAudioSource
+        final idx = nextQueueIndex;
+        if (idx >= 0 && idx < _queue.length) {
+          _playHistory?.recordPlay(_queue[_currentIndex].id);
+          _isSettingSource = true;
+          _currentIndex = idx;
+          _crossfadeTriggeredForSong = false;
+          await _player.setUrl(_queue[idx].path);
+          _position = Duration.zero;
+          _player.play();
+          _syncCurrentToHandler();
+          _isSettingSource = false;
+        } else if (_repeat == PlayerRepeatMode.all && _queue.isNotEmpty) {
+          _playHistory?.recordPlay(_queue[_currentIndex].id);
+          _isSettingSource = true;
+          _currentIndex = 0;
+          _crossfadeTriggeredForSong = false;
+          await _player.setUrl(_queue[0].path);
+          _position = Duration.zero;
+          _player.play();
+          _syncCurrentToHandler();
+          _isSettingSource = false;
+        }
         notifyListeners();
+      } else {
+        // Modo normal (sin crossfade): usar nextQueueIndex + seek() para respetar shuffle
+        final idx = nextQueueIndex;
+        if (idx >= 0 && idx < _queue.length) {
+          _playHistory?.recordPlay(_queue[_currentIndex].id);
+          _currentIndex = idx;
+          await _player.seek(Duration.zero, index: idx);
+          _syncCurrentToHandler();
+          notifyListeners();
+        } else if (_repeat == PlayerRepeatMode.all && _queue.isNotEmpty) {
+          _playHistory?.recordPlay(_queue[_currentIndex].id);
+          _currentIndex = 0;
+          await _player.seek(Duration.zero, index: 0);
+          _syncCurrentToHandler();
+          notifyListeners();
+        }
       }
     } else {
       final idx = _nextYtIndex();
@@ -484,15 +625,39 @@ class PlayerModel extends ChangeNotifier {
 
   Future<void> previous() async {
     if (!hasQueue) return;
-    if (_isCrossfading) return;
+    HapticFeedback.lightImpact();
+    if (_isCrossfading) {
+      _cancelCrossfade();
+    }
     if (_player.position.inSeconds > 3) {
       await _player.seek(Duration.zero);
       return;
     }
 
     if (_source == TrackSource.local) {
-      if (_player.hasPrevious) {
-        await _player.seekToPrevious();
+      if (_crossfadeEnabled) {
+        // Crossfade mode: ir a la anterior manualmente (respeta shuffle)
+        final prevIdx = prevQueueIndex;
+        if (prevIdx >= 0 && prevIdx < _queue.length) {
+          _isSettingSource = true;
+          _currentIndex = prevIdx;
+          _crossfadeTriggeredForSong = false;
+          await _player.setUrl(_queue[prevIdx].path);
+          _position = Duration.zero;
+          _player.play();
+          _syncCurrentToHandler();
+          _isSettingSource = false;
+          notifyListeners();
+        }
+      } else {
+        // Modo normal (sin crossfade): usar prevQueueIndex + seek() para respetar shuffle
+        final prevIdx = prevQueueIndex;
+        if (prevIdx >= 0 && prevIdx < _queue.length) {
+          _currentIndex = prevIdx;
+          await _player.seek(Duration.zero, index: prevIdx);
+          _syncCurrentToHandler();
+          notifyListeners();
+        }
       }
     } else {
       final idx = _prevYtIndex();
@@ -585,10 +750,12 @@ class PlayerModel extends ChangeNotifier {
     }
   }
 
-  void toggleShuffle() {
+  void toggleShuffle() async {
     _shuffle = !_shuffle;
     if (_shuffle) {
       _buildShuffleOrder();
+    } else {
+      _shuffleOrder = [];
     }
     if (_source == TrackSource.youtube) {
       if (!_shuffle && _originalYtQueue.isNotEmpty) {
@@ -600,8 +767,20 @@ class PlayerModel extends ChangeNotifier {
           if (_ytIndex < 0) _ytIndex = 0;
         }
       }
+    } else if (_source == TrackSource.local) {
+      if (!_shuffle && _originalQueue.isNotEmpty) {
+        final currentSong =
+            _currentIndex >= 0 && _currentIndex < _queue.length ? _queue[_currentIndex] : null;
+        _queue = List.of(_originalQueue);
+        if (currentSong != null) {
+          _currentIndex = _queue.indexOf(currentSong);
+          if (_currentIndex < 0) _currentIndex = 0;
+        }
+      }
     }
-    _player.setShuffleModeEnabled(_shuffle);
+    // NO usamos setShuffleModeEnabled: el shuffle se maneja
+    // 100% con _shuffleOrder + nextQueueIndex/prevQueueIndex + seek()
+    _syncToHandler();
     notifyListeners();
   }
 
@@ -636,17 +815,32 @@ class PlayerModel extends ChangeNotifier {
     if (_isCrossfading) _cancelCrossfade();
 
     _isCrossfading = true;
+
+    // Calcular índice de la siguiente canción ANTES de cualquier operación
+    final nextIdx = _queue.indexWhere((s) => s.id == nextSong.id);
+    if (nextIdx < 0) {
+      debugPrint('[CROSSFADE] nextSong not found in queue, aborting');
+      _isCrossfading = false;
+      return;
+    }
+
+    // Actualizar _currentIndex AHORA para que la UI muestre la canción correcta
+    final prevIdx = _currentIndex;
+    _currentIndex = nextIdx;
+    _syncCurrentToHandler();
     notifyListeners();
 
+    // Clonar ecualizador (fire-and-forget con timeout corto)
     AndroidEqualizer? newEqualizer;
     if (_equalizer != null) {
       newEqualizer = AndroidEqualizer();
       try {
         await _copyEqualizerBands(_equalizer!, newEqualizer)
-            .timeout(const Duration(seconds: 2));
+            .timeout(const Duration(seconds: 1));
         debugPrint('[CROSSFADE] EQ copy OK');
       } catch (e) {
-        debugPrint('[CROSSFADE] EQ copy failed, using fresh EQ: $e');
+        debugPrint('[CROSSFADE] EQ copy failed: $e');
+        newEqualizer = null;
       }
     }
 
@@ -655,9 +849,7 @@ class PlayerModel extends ChangeNotifier {
         : AudioPlayer(useProxyForRequestHeaders: false);
     _crossfadeNextPlayer = nextPlayer;
     try {
-      debugPrint('[CROSSFADE] Loading next song...');
       await nextPlayer.setUrl(nextSong.path);
-      debugPrint('[CROSSFADE] Next song loaded. Starting muted playback...');
       nextPlayer.setVolume(0.0);
       nextPlayer.play();
 
@@ -665,80 +857,71 @@ class PlayerModel extends ChangeNotifier {
       final steps = 20;
       final stepMs = (durationMs / steps).toInt();
       debugPrint('[CROSSFADE] Ramp: ${_crossfadeSecs}s, $steps steps, ${stepMs}ms each');
-      final completer = Completer<void>();
 
-      _uiUpdateTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-        notifyListeners();
-      });
-
+      // Ramp sin Completer — el swap se hace inline en el callback del timer
       _crossfadeTimer = Timer.periodic(Duration(milliseconds: stepMs), (timer) {
         if (_crossfadeNextPlayer == null) { timer.cancel(); return; }
         final t = timer.tick / steps;
-        debugPrint('[CROSSFADE] Ramp tick ${timer.tick}/$steps (t=${t.toStringAsFixed(2)})');
+
         if (t >= 1.0) {
           timer.cancel();
           _crossfadeTimer = null;
           try { nextPlayer.setVolume(1.0); } catch (_) {}
-          completer.complete();
+          _swapCrossfadePlayer(nextPlayer, newEqualizer, nextSong);
           return;
         }
+
         final eased = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
         try { _player.setVolume((1.0 - eased).clamp(0.0, 1.0)); } catch (_) {}
         try { nextPlayer.setVolume(eased.clamp(0.0, 1.0)); } catch (_) {}
       });
-
-      await completer.future;
-      debugPrint('[CROSSFADE] Ramp complete. Swapping players...');
-
-      try {
-        await _player.pause().timeout(const Duration(milliseconds: 500));
-      } catch (_) {}
-      try {
-        await _player.stop().timeout(const Duration(milliseconds: 500));
-      } catch (_) {}
-      _player.dispose();
-
-      _player = nextPlayer;
-      if (newEqualizer != null) {
-        _equalizer = newEqualizer;
-      }
-      _position = nextPlayer.position;
-      _setupListeners();
-      _handler?.rebindPlayer(nextPlayer);
-      _syncCurrentToHandler();
-      debugPrint('[CROSSFADE] Swap complete. Now playing: "${nextSong.title}"');
-      notifyListeners();
-
-      _uiUpdateTimer?.cancel();
-      int postSwapTicks = 0;
-      _uiUpdateTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-        _position = _player.position;
-        notifyListeners();
-        postSwapTicks++;
-        if (postSwapTicks >= 6) {
-          _uiUpdateTimer?.cancel();
-          _uiUpdateTimer = null;
-        }
-      });
     } catch (e) {
       debugPrint('[CROSSFADE] ERROR: $e');
       nextPlayer.dispose();
-    } finally {
       _crossfadeNextPlayer = null;
-      _crossfadeTimer = null;
       _isCrossfading = false;
+      _currentIndex = prevIdx;
+      _syncCurrentToHandler();
       notifyListeners();
     }
+  }
+
+  /// Intercambia el player viejo por el nuevo después del ramp de crossfade.
+  void _swapCrossfadePlayer(AudioPlayer nextPlayer, AndroidEqualizer? newEqualizer, LocalSong nextSong) {
+    debugPrint('[CROSSFADE] Swapping players → "${nextSong.title}"');
+    _crossfadeNextPlayer = null;
+
+    // Dispose fire-and-forget del player viejo
+    try { _player.setVolume(1.0); } catch (_) {}
+    _player.dispose();
+
+    _player = nextPlayer;
+    if (newEqualizer != null) {
+      _equalizer = newEqualizer;
+    }
+    _position = nextPlayer.position;
+    _setupListeners();
+    _handler?.rebindPlayer(nextPlayer);
+    _syncCurrentToHandler();
+    _isCrossfading = false;
+    // Proteger _indexSub del nuevo player durante las primeras emisiones
+    _isSettingSource = true;
+    debugPrint('[CROSSFADE] Swap complete. Playing: "${nextSong.title}" (index=$_currentIndex)');
+    notifyListeners();
+    // Liberar protección después de que el nuevo player esté estable
+    Future.delayed(const Duration(milliseconds: 2000), () {
+      _isSettingSource = false;
+    });
   }
 
   void _cancelCrossfade() {
     _crossfadeTimer?.cancel();
     _crossfadeTimer = null;
-    _uiUpdateTimer?.cancel();
-    _uiUpdateTimer = null;
     try { _crossfadeNextPlayer?.dispose(); } catch (_) {}
     _crossfadeNextPlayer = null;
     _isCrossfading = false;
+    _crossfadeTriggeredForSong = false;
+    _isSettingSource = false;
     try { _player.setVolume(1.0); } catch (_) {}
   }
 
@@ -749,7 +932,6 @@ class PlayerModel extends ChangeNotifier {
     _processSub?.cancel();
     _indexSub?.cancel();
     _crossfadeTimer?.cancel();
-    _uiUpdateTimer?.cancel();
     _cancelCrossfade();
     _ytAudioService.dispose();
     _ytUrlCache.close();

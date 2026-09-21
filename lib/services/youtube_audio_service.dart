@@ -2,57 +2,55 @@ import 'package:flutter/foundation.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 /// Servicio que obtiene URLs de audio de YouTube.
-/// Intenta múltiples clientes InnerTube con fallback; timeout de 15s.
+/// Clientes optimizados contra SABR: androidVr primero, luego audioOnly.
 class YouTubeAudioService {
   final YoutubeExplode _yt = YoutubeExplode();
 
-  /// Clientes InnerTube en orden de prioridad.
-  /// android y androidSdkless no requieren deciphering.
+  /// Clientes InnerTube ordenados por resistencia a SABR.
+  /// androidVr (Oculus) es el más estable actualmente.
   static final _clients = [
+    YoutubeApiClient.androidVr,
     YoutubeApiClient.androidSdkless,
-    YoutubeApiClient.ios,
+    YoutubeApiClient.mweb,
     YoutubeApiClient.safari,
     YoutubeApiClient.tv,
-    YoutubeApiClient.mweb,
   ];
 
   /// Busca la mejor URL de audio con fallback multi-cliente.
   Future<String?> _findWorkingUrl(String videoId) async {
     for (final client in _clients) {
       try {
-        debugPrint('YouTubeAudioService: intentando cliente ${client.apiUrl.split('/').last}');
+        final clientName = client.apiUrl.split('/').last;
+        debugPrint('YouTubeAudioService: intentando $clientName');
         final manifest = await _yt.videos.streamsClient
             .getManifest(videoId, ytClients: [client])
             .timeout(const Duration(seconds: 15));
 
-        // ── 1. Intentar muxed (tag 18, 360p) — más confiable ──
-        final muxedStreams = manifest.muxed;
-        if (muxedStreams.isNotEmpty) {
-          final tag18 = muxedStreams.where((s) => s.tag == 18).toList();
-          if (tag18.isNotEmpty) {
-            final url = tag18.first.url.toString();
-            debugPrint('YouTubeAudioService: muxed tag 18 OK via ${client.apiUrl.split('/').last}');
-            return url;
-          }
-          final url = muxedStreams.first.url.toString();
-          debugPrint('YouTubeAudioService: muxed fallback tag=${muxedStreams.first.tag}');
-          return url;
-        }
-
-        // ── 2. Fallback: audio-only (M4A/AAC tag 140) ──
+        // ── 1. Audio-only primero (más resistente a SABR) ──
         final audioStreams = manifest.audioOnly;
         if (audioStreams.isNotEmpty) {
           final m4a = audioStreams
               .where((s) => s.container == StreamContainer.mp4 || s.tag == 140)
               .toList();
           final candidates = m4a.isNotEmpty ? m4a : audioStreams.sortByBitrate();
-
           final url = candidates.last.url.toString();
-          debugPrint('YouTubeAudioService: audio-only tag=${candidates.last.tag}');
+          debugPrint('YouTubeAudioService: audioOnly tag=${candidates.last.tag} via $clientName');
           return url;
         }
+
+        // ── 2. Fallback: muxed tag 18 (360p con audio+video) ──
+        final muxedStreams = manifest.muxed;
+        if (muxedStreams.isNotEmpty) {
+          final tag18 = muxedStreams.where((s) => s.tag == 18).toList();
+          if (tag18.isNotEmpty) {
+            debugPrint('YouTubeAudioService: muxed tag18 via $clientName');
+            return tag18.first.url.toString();
+          }
+          debugPrint('YouTubeAudioService: muxed fallback tag=${muxedStreams.first.tag} via $clientName');
+          return muxedStreams.first.url.toString();
+        }
       } catch (e) {
-        debugPrint('YouTubeAudioService: cliente ${client.apiUrl.split('/').last} falló: $e');
+        debugPrint('YouTubeAudioService: cliente falló: $e');
       }
     }
 

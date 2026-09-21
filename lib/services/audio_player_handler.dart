@@ -5,18 +5,30 @@ import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../models/favorites_model.dart';
 import '../models/library_model.dart';
+import '../models/play_history_model.dart';
 import '../models/player_model.dart';
 import '../models/song.dart';
+import 'youtube_audio_service.dart';
 import 'youtube_search.dart';
 
-/// Conecta el reproductor con audio_service (fondo + notificación).
-///
-/// Comparte el mismo [AudioPlayer] que usa el [PlayerModel] de la UI.
+const _catRoot = 'root';
+const _catAllSongs = 'cat_songs';
+const _catAlbums = 'cat_albums';
+const _catArtists = 'cat_artists';
+const _catFavorites = 'cat_favorites';
+const _catRecent = 'cat_recent';
+const _catRecentAA = 'recent';
+
 class AudioPlayerHandler extends BaseAudioHandler {
   AudioPlayer player;
   final PlayerModel model;
   LibraryModel? _library;
+  FavoritesModel? _favorites;
+  PlayHistoryModel? _playHistory;
+  YouTubeSearch? _ytSearch;
+  final YouTubeAudioService _ytAudioService = YouTubeAudioService();
   StreamSubscription? _eventSub;
   StreamSubscription? _processingSub;
   Timer? _periodicTimer;
@@ -46,7 +58,6 @@ class AudioPlayerHandler extends BaseAudioHandler {
         bufferedPosition: event.bufferedPosition,
       );
     });
-
     _processingSub = player.processingStateStream.listen((p) {
       if (p == ProcessingState.completed) {
         _notifyPlaybackState(playing: false);
@@ -54,8 +65,6 @@ class AudioPlayerHandler extends BaseAudioHandler {
     });
   }
 
-  /// Refresco periódico cada 1s: mantiene la barra de progreso activa
-  /// incluso si el stream principal pierde eventos.
   void _startPeriodicRefresh() {
     _periodicTimer?.cancel();
     _periodicTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -69,11 +78,305 @@ class AudioPlayerHandler extends BaseAudioHandler {
     });
   }
 
-  void attachLibrary(LibraryModel library) {
-    _library = library;
+  void attachLibrary(LibraryModel library) => _library = library;
+  void attachFavorites(FavoritesModel favorites) => _favorites = favorites;
+  void attachPlayHistory(PlayHistoryModel history) => _playHistory = history;
+  void attachYouTubeSearch(YouTubeSearch search) => _ytSearch = search;
+
+  // ═══════════════════ ANDROID AUTO BROWSING ═══════════════════
+
+  @override
+  Future<List<MediaItem>> getChildren(String parentMediaId,
+      [Map<String, dynamic>? options]) async {
+    switch (parentMediaId) {
+      case _catRoot:
+        return _getRootCategories();
+      case _catAllSongs:
+        return _getAllSongs();
+      case _catAlbums:
+        return _getAlbums();
+      case _catFavorites:
+        return _getFavorites();
+      case _catArtists:
+        return _getArtists();
+      case _catRecent:
+      case _catRecentAA:
+        return _getRecent();
+      default:
+        if (parentMediaId.startsWith('album_')) {
+          return _getSongsByAlbum(parentMediaId.substring(6));
+        } else if (parentMediaId.startsWith('artist_')) {
+          return _getSongsByArtist(parentMediaId.substring(7));
+        }
+        return [];
+    }
   }
 
-  /// Directorio estable para imágenes de notificación (no se limpia por el SO).
+  List<MediaItem> _getRootCategories() {
+    final lib = _library;
+    final songCount = lib?.allSongs.length ?? 0;
+    final albumCount = lib?.albums.length ?? 0;
+    final artistCount = lib?.artists.length ?? 0;
+    final favCount = _favorites?.songs.length ?? 0;
+    final recentCount = _playHistory != null
+        ? _playHistory!.getRecentlyPlayed(lib?.allSongs ?? [], limit: 50).length
+        : 0;
+
+    return [
+      MediaItem(
+        id: _catAllSongs,
+        title: 'Todas las canciones',
+        displaySubtitle: '$songCount canciones',
+        playable: false,
+      ),
+      MediaItem(
+        id: _catAlbums,
+        title: 'Álbumes',
+        displaySubtitle: '$albumCount álbumes',
+        playable: false,
+      ),
+      MediaItem(
+        id: _catArtists,
+        title: 'Artistas',
+        displaySubtitle: '$artistCount artistas',
+        playable: false,
+      ),
+      MediaItem(
+        id: _catFavorites,
+        title: 'Favoritos',
+        displaySubtitle: '$favCount canciones',
+        playable: false,
+      ),
+      MediaItem(
+        id: _catRecent,
+        title: 'Recientes',
+        displaySubtitle: '$recentCount canciones',
+        playable: false,
+      ),
+    ];
+  }
+
+  Future<List<MediaItem>> _getAllSongs() async {
+    final lib = _library;
+    if (lib == null) return [];
+    return _songsToMediaItems(lib.allSongs);
+  }
+
+  Future<List<MediaItem>> _getAlbums() async {
+    final lib = _library;
+    if (lib == null) return [];
+    return lib.albums.map((a) => MediaItem(
+          id: 'album_${a.name}',
+          title: a.name,
+          displaySubtitle: '${a.songCount} canciones',
+          playable: false,
+        )).toList();
+  }
+
+  Future<List<MediaItem>> _getSongsByAlbum(String albumName) async {
+    final lib = _library;
+    if (lib == null) return [];
+    return _songsToMediaItems(lib.songsByAlbum(albumName));
+  }
+
+  Future<List<MediaItem>> _getArtists() async {
+    final lib = _library;
+    if (lib == null) return [];
+    return lib.artists.map((a) => MediaItem(
+          id: 'artist_${a.name}',
+          title: a.name,
+          displaySubtitle: '${a.songCount} canciones',
+          playable: false,
+        )).toList();
+  }
+
+  Future<List<MediaItem>> _getSongsByArtist(String artistName) async {
+    final lib = _library;
+    if (lib == null) return [];
+    return _songsToMediaItems(lib.songsByArtist(artistName));
+  }
+
+  Future<List<MediaItem>> _getFavorites() async {
+    final favs = _favorites;
+    if (favs == null) return [];
+    return _songsToMediaItems(favs.songs);
+  }
+
+  Future<List<MediaItem>> _getRecent() async {
+    final hist = _playHistory;
+    final lib = _library;
+    if (hist == null || lib == null) return [];
+    return _songsToMediaItems(hist.getRecentlyPlayed(lib.allSongs, limit: 50));
+  }
+
+  Future<List<MediaItem>> _songsToMediaItems(List<LocalSong> songs) async {
+    final futures = songs.map((s) async {
+      Uri? artUri;
+      if (_library != null) {
+        final bytes = await _library!.songArtworkFor(s.id, albumId: s.albumId);
+        artUri = await _writeArtwork(s.id, bytes);
+      }
+      return MediaItem(
+        id: s.path,
+        title: s.title,
+        artist: s.artist.isEmpty ? 'Artista desconocido' : s.artist,
+        album: s.album,
+        duration: s.duration,
+        artUri: artUri,
+        playable: true,
+      );
+    }).toList();
+    return Future.wait(futures);
+  }
+
+  @override
+  Future<void> playFromMediaId(String mediaId,
+      [Map<String, dynamic>? extras]) async {
+    if (mediaId.startsWith('yt_')) {
+      final videoId = mediaId.substring(3);
+      final q = super.queue.value;
+      final existing = q.firstWhere(
+        (item) => item.id == mediaId,
+        orElse: () => MediaItem(id: mediaId, title: ''),
+      );
+      final audioUrl = await _ytAudioService.getAudioUrl(videoId);
+      if (audioUrl == null) return;
+      final source = AudioSource.uri(Uri.parse(audioUrl), tag: 'yt_$videoId');
+      final video = YouTubeVideo(
+        videoId: videoId,
+        title: existing.title.isNotEmpty ? existing.title : (extras?['title'] ?? videoId),
+        channel: existing.artist ?? (extras?['artist'] ?? ''),
+        thumb: existing.artUri?.toString() ?? (extras?['thumb'] ?? ''),
+      );
+      await model.playYouTubeQueue([video], [source], 0);
+      return;
+    }
+    final lib = _library;
+    if (lib == null) return;
+    final songs = lib.allSongs;
+    final index = songs.indexWhere((s) => s.path == mediaId);
+    if (index >= 0) {
+      model.playQueue(songs, index);
+    }
+  }
+
+  @override
+  Future<void> skipToQueueItem(int index) async {
+    final q = super.queue.value;
+    if (index < 0 || index >= q.length) return;
+    final item = q[index];
+    await playFromMediaId(item.id, {
+      'title': item.title,
+      'artist': item.artist,
+    });
+  }
+
+  // ═══════════════════ BÚSQUEDA ANDROID AUTO ═══════════════════
+
+  @override
+  Future<List<MediaItem>> search(String query,
+      [Map<String, dynamic>? extras]) async {
+    final q = query.toLowerCase().trim();
+    if (q.isEmpty) return [];
+
+    final results = <MediaItem>[];
+
+    final lib = _library;
+    if (lib != null) {
+      final localMatches = lib.allSongs.where((s) {
+        return s.title.toLowerCase().contains(q) ||
+            s.artist.toLowerCase().contains(q) ||
+            s.album.toLowerCase().contains(q);
+      }).toList();
+      results.addAll(await _songsToMediaItems(localMatches));
+    }
+
+    final ytSearch = _ytSearch;
+    if (ytSearch != null) {
+      try {
+        final ytResults = await ytSearch.search(query, max: 10);
+        for (final v in ytResults) {
+          results.add(MediaItem(
+            id: 'yt_${v.videoId}',
+            title: v.title,
+            artist: v.channel,
+            album: 'YouTube',
+            artUri: Uri.parse(v.thumb),
+            playable: true,
+          ));
+        }
+      } catch (_) {}
+    }
+
+    return results;
+  }
+
+  // ═══════════════════ COLA LOCAL ═══════════════════
+
+  Future<void> publishQueue(List<LocalSong> songs, int index) async {
+    final futures = songs.map((s) async {
+      Uri? artUri;
+      if (_library != null) {
+        try {
+          final bytes = await _library!.songArtworkFor(s.id, albumId: s.albumId);
+          artUri = await _writeArtwork(s.id, bytes);
+        } catch (_) {}
+      }
+      return MediaItem(
+        id: s.path,
+        title: s.title,
+        artist: s.artist.isEmpty ? 'Artista desconocido' : s.artist,
+        album: s.album,
+        duration: s.duration,
+        artUri: artUri,
+      );
+    }).toList();
+    final items = await Future.wait(futures);
+    super.queue.add(items);
+    _emitCurrentSongFromQueue();
+  }
+
+  // ═══════════════════ COLA YOUTUBE ═══════════════════
+
+  Future<void> publishYouTubeQueue(List<YouTubeVideo> videos, int index) async {
+    final futures = videos.map((v) async {
+      final artUri = await _fetchYouTubeArt(v.videoId);
+      return MediaItem(
+        id: 'yt_${v.videoId}',
+        title: v.title,
+        artist: v.channel,
+        artUri: artUri,
+        duration: v.duration != null ? Duration(seconds: v.duration!) : null,
+      );
+    }).toList();
+    final items = await Future.wait(futures);
+    super.queue.add(items);
+    _emitCurrentSongFromQueue();
+  }
+
+  // ═══════════════════ ACTUALIZACIÓN ═══════════════════
+
+  void _emitCurrentSongFromQueue() {
+    final q = super.queue.value;
+    if (q.isEmpty) return;
+    final searchId = model.current?.path ??
+        (model.currentYouTube != null ? 'yt_${model.currentYouTube!.videoId}' : null);
+    if (searchId == null) return;
+    final idx = q.indexWhere((item) => item.id == searchId);
+    if (idx < 0) return;
+    var item = q[idx];
+    final dur = player.duration;
+    if (dur != null && dur > Duration.zero) {
+      item = item.copyWith(duration: dur);
+    }
+    mediaItem.add(item);
+  }
+
+  void onSongChanged(int index) => _emitCurrentSongFromQueue();
+  void onYouTubeChanged(int index) => _emitCurrentSongFromQueue();
+
+  // ═══════════════════ ARTWORK ═══════════════════
+
   Future<Directory> _getArtDir() async {
     if (_artDir != null && await _artDir!.exists()) return _artDir!;
     final appDir = await getApplicationDocumentsDirectory();
@@ -88,17 +391,18 @@ class AudioPlayerHandler extends BaseAudioHandler {
     if (bytes == null || bytes.isEmpty) return null;
     final dir = await _getArtDir();
     final file = File('${dir.path}/art_$id.jpg');
+    if (await file.exists()) return Uri.file(file.path);
     await file.writeAsBytes(bytes, flush: true);
     return Uri.file(file.path);
   }
 
-  /// Descarga la miniatura de YouTube y la guarda localmente.
   Future<Uri?> _fetchYouTubeArt(String videoId) async {
+    final cached = File('${(await _getArtDir()).path}/yt_$videoId.jpg');
+    if (await cached.exists()) return Uri.file(cached.path);
+    HttpClient? client;
     try {
-      final url = Uri.parse(
-        'https://img.youtube.com/vi/$videoId/mqdefault.jpg',
-      );
-      final client = HttpClient();
+      final url = Uri.parse('https://img.youtube.com/vi/$videoId/mqdefault.jpg');
+      client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 10);
       final request = await client.getUrl(url);
       final response = await request.close().timeout(const Duration(seconds: 15));
@@ -113,69 +417,26 @@ class AudioPlayerHandler extends BaseAudioHandler {
         return Uri.file(file.path);
       }
     } catch (_) {}
+    client?.close(force: true);
     return null;
   }
 
-  // ═══════════════════ COLA LOCAL ═══════════════════
-
-  Future<void> publishQueue(List<LocalSong> songs, int index) async {
-    final items = <MediaItem>[];
-    for (final s in songs) {
-      Uri? artUri;
-      if (_library != null) {
-        final bytes = await _library!.songArtworkFor(s.id, albumId: s.albumId);
-        artUri = await _writeArtwork(s.id, bytes);
-      }
-      items.add(MediaItem(
-        id: s.path,
-        title: s.title,
-        artist: s.artist.isEmpty ? 'Artista desconocido' : s.artist,
-        album: s.album,
-        duration: s.duration,
-        artUri: artUri,
-      ));
-    }
-    super.queue.add(items);
-    _updateMediaItem(index);
-  }
-
-  // ═══════════════════ COLA YOUTUBE ═══════════════════
-
-  Future<void> publishYouTubeQueue(List<YouTubeVideo> videos, int index) async {
-    final items = <MediaItem>[];
-    for (final v in videos) {
-      final artUri = await _fetchYouTubeArt(v.videoId);
-      items.add(MediaItem(
-        id: 'yt_${v.videoId}',
-        title: v.title,
-        artist: v.channel,
-        artUri: artUri,
-        duration: v.duration != null ? Duration(seconds: v.duration!) : null,
-      ));
-    }
-    super.queue.add(items);
-    _updateMediaItem(index);
-  }
-
-  // ═══════════════════ ACTUALIZACIÓN ═══════════════════
-
-  void _updateMediaItem(int index) {
-    final q = super.queue.value;
-    if (q.isNotEmpty && index >= 0 && index < q.length) {
-      var item = q[index];
-      final dur = player.duration;
-      if (dur != null && dur > Duration.zero) {
-        item = item.copyWith(duration: dur);
-      }
-      mediaItem.add(item);
-    }
-  }
-
-  void onSongChanged(int index) => _updateMediaItem(index);
-
-  void onYouTubeChanged(int index) => _updateMediaItem(index);
-
   // ═══════════════════ PLAYBACK STATE ═══════════════════
+
+  AudioServiceRepeatMode _mapRepeatMode() {
+    switch (model.repeat) {
+      case PlayerRepeatMode.off:
+        return AudioServiceRepeatMode.none;
+      case PlayerRepeatMode.all:
+        return AudioServiceRepeatMode.all;
+      case PlayerRepeatMode.one:
+        return AudioServiceRepeatMode.one;
+    }
+  }
+
+  AudioServiceShuffleMode _mapShuffleMode() {
+    return model.shuffle ? AudioServiceShuffleMode.all : AudioServiceShuffleMode.none;
+  }
 
   void _notifyPlaybackState({
     List<MediaControl>? controls,
@@ -192,6 +453,8 @@ class AudioPlayerHandler extends BaseAudioHandler {
         updatePosition: updatePosition ?? player.position,
         bufferedPosition: bufferedPosition ?? player.bufferedPosition,
         speed: player.speed,
+        repeatMode: _mapRepeatMode(),
+        shuffleMode: _mapShuffleMode(),
       ),
     );
   }
@@ -212,10 +475,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
 
   List<MediaControl> get _controls => [
         MediaControl.skipToPrevious,
-        if (player.playing)
-          MediaControl.pause
-        else
-          MediaControl.play,
+        if (player.playing) MediaControl.pause else MediaControl.play,
         MediaControl.skipToNext,
       ];
 
@@ -226,7 +486,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
 
   @override
   Future<void> pause() async {
-    if (player.playing) await player.pause();
+    await model.togglePlay();
   }
 
   @override
@@ -242,6 +502,34 @@ class AudioPlayerHandler extends BaseAudioHandler {
   @override
   Future<void> seek(Duration position) async {
     await player.seek(position);
+  }
+
+  @override
+  Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) async {
+    switch (repeatMode) {
+      case AudioServiceRepeatMode.none:
+        if (model.repeat != PlayerRepeatMode.off) model.cycleRepeat();
+      case AudioServiceRepeatMode.all:
+        while (model.repeat != PlayerRepeatMode.all) {
+          model.cycleRepeat();
+        }
+      case AudioServiceRepeatMode.one:
+        while (model.repeat != PlayerRepeatMode.one) {
+          model.cycleRepeat();
+        }
+      default:
+        break;
+    }
+    _notifyPlaybackState();
+  }
+
+  @override
+  Future<void> setShuffleMode(AudioServiceShuffleMode shuffleMode) async {
+    final shouldShuffle = shuffleMode == AudioServiceShuffleMode.all;
+    if (model.shuffle != shouldShuffle) {
+      model.toggleShuffle();
+    }
+    _notifyPlaybackState();
   }
 
   @override

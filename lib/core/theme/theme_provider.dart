@@ -99,6 +99,7 @@ class ThemeProvider extends ChangeNotifier {
   int _particleIntensity = 1; // 0=sutil, 1=medio, 2=intenso
   bool _particlesEnabled = true;
   bool _equalizerEnabled = false;
+  List<double> _equalizerGains = [0, 0, 0, 0, 0];
 
   // ── Estado animado ──
   Color _animatedVibrant = MelodiaColors.violetLight;
@@ -124,6 +125,7 @@ class ThemeProvider extends ChangeNotifier {
   int get particleIntensity => _particleIntensity;
   bool get particlesEnabled => _particlesEnabled;
   bool get equalizerEnabled => _equalizerEnabled;
+  List<double> get equalizerGains => List.unmodifiable(_equalizerGains);
 
   /// Color efectivo del accent — animado cuando el color dinámico cambia.
   Color get effectiveAccent => _autoColorEnabled ? _animatedVibrant : _accentColor;
@@ -173,6 +175,10 @@ class ThemeProvider extends ChangeNotifier {
     }
     if (particlesOn != null) _particlesEnabled = particlesOn as bool;
     if (eqOn != null) _equalizerEnabled = eqOn as bool;
+    final eqGains = box.get('equalizerGains');
+    if (eqGains is List && eqGains.length == 5) {
+      _equalizerGains = eqGains.cast<double>();
+    }
 
     _animatedVibrant = _vibrantColor;
     _animatedDominant = _dominantColor;
@@ -231,6 +237,11 @@ class ThemeProvider extends ChangeNotifier {
     _equalizerEnabled = enabled;
     _box.put('equalizerEnabled', enabled);
     notifyListeners();
+  }
+
+  void saveEqualizerGains(List<double> gains) {
+    _equalizerGains = List.from(gains);
+    _box.put('equalizerGains', gains);
   }
 
   // ═══════════════════ CONTRASTE ═══════════════════

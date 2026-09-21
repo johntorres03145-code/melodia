@@ -76,12 +76,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
     if (audioUrl == null) {
       if (!mounted) return;
       setState(() => _loadingVideoId = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo obtener el audio de este video.'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      // Fallback: abrir WebView player (YouTube maneja SABR internamente)
+      _openVideo(video);
       return;
     }
 

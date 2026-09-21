@@ -34,7 +34,7 @@ android {
     defaultConfig {
         applicationId = "com.melodia.melodia"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
@@ -47,7 +47,7 @@ android {
                 signingConfigs.getByName("debug")
             }
             isMinifyEnabled = true
-            isShrinkResources = true
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

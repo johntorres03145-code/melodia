@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../core/theme/melodia_colors.dart';
 import '../core/theme/theme_provider.dart';
@@ -68,6 +70,10 @@ class SongTileRow extends StatelessWidget {
                 child: _MenuTile(icon: Icons.play_arrow_rounded, title: 'Reproducir ahora'),
               ),
               const PopupMenuItem(
+                value: 'next',
+                child: _MenuTile(icon: Icons.skip_next, title: 'Reproducir después'),
+              ),
+              const PopupMenuItem(
                 value: 'queue',
                 child: _MenuTile(icon: Icons.queue_music, title: 'Agregar a la cola'),
               ),
@@ -102,12 +108,26 @@ class SongTileRow extends StatelessWidget {
     switch (value) {
       case 'play':
         player.playQueue([song], 0);
+      case 'next':
+        player.playNext(song);
+        HapticFeedback.mediumImpact();
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Reproducirá "${song.title}" después'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
       case 'queue':
         player.addToQueue(song);
       case 'favorite':
         favorites.toggle(song);
       case 'share':
-        break;
+        final text = song.artist.isEmpty
+            ? '${song.title}\n${song.path}'
+            : '${song.title} - ${song.artist}\n${song.path}';
+        Share.share(text);
       case 'hide':
         library.hideSong(song.id);
         ScaffoldMessenger.of(context).showSnackBar(

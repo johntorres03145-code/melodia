@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -26,6 +28,7 @@ class _LibraryScreenState extends State<LibraryScreen>
   late final TabController _tabController;
   bool _selectMode = false;
   final Set<int> _selectedIds = {};
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -87,6 +90,7 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -125,7 +129,12 @@ class _LibraryScreenState extends State<LibraryScreen>
               children: [
                 Expanded(
                   child: TextField(
-                    onChanged: library.setQuery,
+                    onChanged: (q) {
+                      _searchDebounce?.cancel();
+                      _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+                        library.setQuery(q);
+                      });
+                    },
                     decoration: InputDecoration(
                       hintText: 'Buscar canciones...',
                       prefixIcon: const Icon(Icons.search, size: 20),
@@ -202,7 +211,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                               ],
                             ),
                   // ── Bottom action bar (multi-select) ──
-                  if (_selectMode && _selectedIds.isNotEmpty)
+                  if (_selectMode)
                     Positioned(
                       left: 0,
                       right: 0,
@@ -352,12 +361,16 @@ class _LibraryScreenState extends State<LibraryScreen>
                 ),
                 const SizedBox(width: 10),
                 _ActionChip(
-                  label: 'Seleccionar',
-                  icon: Icons.checklist,
-                  filled: false,
+                  label: _selectMode ? 'Cancelar' : 'Seleccionar',
+                  icon: _selectMode ? Icons.close : Icons.checklist,
+                  filled: _selectMode,
                   onTap: () {
                     setState(() {
-                      _selectMode = true;
+                      if (_selectMode) {
+                        _exitSelectMode();
+                      } else {
+                        _selectMode = true;
+                      }
                     });
                   },
                 ),
@@ -383,12 +396,12 @@ class _LibraryScreenState extends State<LibraryScreen>
                         ? () => _toggleSelection(song.id)
                         : () {
                             final library = context.read<LibraryModel>();
-                            final allSongs = library.allSongs;
+                            final sortedSongs = library.songs;
                             final fullIndex =
-                                allSongs.indexWhere((s) => s.id == song.id);
+                                sortedSongs.indexWhere((s) => s.id == song.id);
                             library.setQuery('');
                             player.playQueue(
-                                allSongs, fullIndex >= 0 ? fullIndex : 0);
+                                sortedSongs, fullIndex >= 0 ? fullIndex : 0);
                           },
                     contentPadding: EdgeInsets.zero,
                     leading: _selectMode
