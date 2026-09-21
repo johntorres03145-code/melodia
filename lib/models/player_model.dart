@@ -821,7 +821,7 @@ class PlayerModel extends ChangeNotifier {
 
     _isCrossfading = true;
 
-    // Calcular índice de la siguiente canción ANTES de cualquier operación
+    // Calcular índice de la siguiente canción
     final nextIdx = _queue.indexWhere((s) => s.id == nextSong.id);
     if (nextIdx < 0) {
       debugPrint('[CROSSFADE] nextSong not found in queue, aborting');
@@ -829,11 +829,8 @@ class PlayerModel extends ChangeNotifier {
       return;
     }
 
-    // Actualizar _currentIndex AHORA para que la UI muestre la canción correcta
-    final prevIdx = _currentIndex;
-    _currentIndex = nextIdx;
-    _syncCurrentToHandler();
-    notifyListeners();
+    // NO actualizar _currentIndex aquí — se actualiza en _swapCrossfadePlayer
+    // para que la UI muestre la canción vieja hasta que el audio cambie
 
     // Clonar ecualizador (fire-and-forget con timeout corto)
     AndroidEqualizer? newEqualizer;
@@ -885,7 +882,6 @@ class PlayerModel extends ChangeNotifier {
       nextPlayer.dispose();
       _crossfadeNextPlayer = null;
       _isCrossfading = false;
-      _currentIndex = prevIdx;
       _syncCurrentToHandler();
       notifyListeners();
     }
@@ -904,6 +900,11 @@ class PlayerModel extends ChangeNotifier {
     if (newEqualizer != null) {
       _equalizer = newEqualizer;
     }
+
+    // Actualizar _currentIndex de forma atómica con el swap del player
+    final newIdx = _queue.indexWhere((s) => s.id == nextSong.id);
+    if (newIdx >= 0) _currentIndex = newIdx;
+
     _position = nextPlayer.position;
     _setupListeners();
     _handler?.rebindPlayer(nextPlayer);

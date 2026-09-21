@@ -1101,13 +1101,16 @@ class _NowPlayingPageState extends State<NowPlayingPage>
               size: 26),
           onPressed: player.toggleShuffle,
         ),
-        _LongPressSeekButton(
-          icon: Icons.skip_previous_rounded,
-          iconColor: iconColor,
-          onLongPress: () => player.seek(
-            Duration(milliseconds: (player.position.inMilliseconds - 5000).clamp(0, player.duration.inMilliseconds)),
+        // Retroceder 10 segundos
+        IconButton(
+          icon: Icon(Icons.replay_10_rounded, size: 28, color: iconColor),
+          onPressed: () => player.seek(
+            Duration(milliseconds: (player.position.inMilliseconds - 10000).clamp(0, player.duration.inMilliseconds)),
           ),
-          onTap: player.previous,
+        ),
+        IconButton(
+          icon: Icon(Icons.skip_previous_rounded, size: 32, color: iconColor),
+          onPressed: player.previous,
         ),
         Container(
           width: 64, height: 64,
@@ -1120,13 +1123,16 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             onPressed: player.togglePlay,
           ),
         ),
-        _LongPressSeekButton(
-          icon: Icons.skip_next_rounded,
-          iconColor: iconColor,
-          onLongPress: () => player.seek(
-            Duration(milliseconds: (player.position.inMilliseconds + 5000).clamp(0, player.duration.inMilliseconds)),
+        IconButton(
+          icon: Icon(Icons.skip_next_rounded, size: 32, color: iconColor),
+          onPressed: player.next,
+        ),
+        // Adelantar 10 segundos
+        IconButton(
+          icon: Icon(Icons.forward_10_rounded, size: 28, color: iconColor),
+          onPressed: () => player.seek(
+            Duration(milliseconds: (player.position.inMilliseconds + 10000).clamp(0, player.duration.inMilliseconds)),
           ),
-          onTap: player.next,
         ),
         IconButton(
           icon: Icon(repeatIcon, color: repeatColor, size: 26),
