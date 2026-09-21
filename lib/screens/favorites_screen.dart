@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/theme/melodia_colors.dart';
@@ -181,11 +182,10 @@ class _HeroHeaderState extends State<_HeroHeader> {
             const SizedBox(height: 4),
             Text(
               quote,
-              style: const TextStyle(
-                fontFamily: 'Playfair Display',
+              style: GoogleFonts.playfairDisplay(
                 fontStyle: FontStyle.italic,
                 fontSize: 12.5,
-                color: Color(0xCCFFFFFF),
+                color: const Color(0xCCFFFFFF),
               ),
               textAlign: TextAlign.center,
             ),

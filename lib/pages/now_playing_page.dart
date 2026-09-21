@@ -40,6 +40,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   bool _showLyrics = false;
   String? _lastLyricsKey;
   final Map<int, Future<dynamic>> _artworkFutures = {};
+  final ScrollController _lyricsScrollController = ScrollController();
 
   @override
   void initState() {
@@ -58,6 +59,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   void dispose() {
     _waveCtrl.dispose();
     _vinylCtrl.dispose();
+    _lyricsScrollController.dispose();
     super.dispose();
   }
 
@@ -68,8 +70,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     final song = player.current;
     final ytVideo = player.currentYouTube;
 
-    // Buscar letras cuando cambia la canción
-    _fetchLyricsIfNeeded(song, ytVideo);
+    // Buscar letras cuando cambia la canción (fuera del build)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchLyricsIfNeeded(song, ytVideo);
+    });
 
     if (player.playing) {
       if (!_waveCtrl.isAnimating) _waveCtrl.repeat();
@@ -360,6 +364,18 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       if (pos >= lyrics[i].timestamp) { activeIdx = i; break; }
     }
 
+    // Auto-scroll a la línea activa
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_lyricsScrollController.hasClients) {
+        final targetOffset = (activeIdx * 25.0) - 100.0;
+        _lyricsScrollController.animateTo(
+          targetOffset.clamp(0.0, _lyricsScrollController.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+
     return GestureDetector(
       onVerticalDragUpdate: (d) {
         if (d.delta.dy > 5 && _showLyrics) setState(() => _showLyrics = false);
@@ -392,6 +408,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             ),
             Expanded(
               child: ListView.builder(
+                controller: _lyricsScrollController,
                 padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                 itemCount: lyrics.length,
                 itemBuilder: (ctx, i) {
@@ -618,7 +635,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         future: _downloadThumb(ytVideo.thumb),
         builder: (context, snap) {
           if (snap.hasData && snap.data != null) {
-            _extractColorsFromArtwork(snap.data!, context);
+            _extractColorsFromArtwork(ytVideo.videoId, snap.data!, context);
             return Image.memory(snap.data!,
                 fit: BoxFit.cover,
                 width: size,
@@ -651,7 +668,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         builder: (context, snap) {
           if (snap.hasData && snap.data != null) {
             final bytes = snap.data as Uint8List;
-            _extractColorsFromArtwork(bytes, context);
+            _extractColorsFromArtwork('local_${song.id}', bytes, context);
             return Image.memory(bytes, fit: BoxFit.cover,
                 width: size, height: size,
                 filterQuality: FilterQuality.high,
@@ -666,14 +683,15 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   }
 
   // Cache para no re-extraer el mismo artwork
-  static Uint8List? _lastArtworkBytes;
-  static String _lastThumbUrl = '';
-  static Uint8List? _lastThumbBytes;
+  String _lastArtworkSongId = '';
+  String _lastThumbUrl = '';
+  Uint8List? _lastThumbBytes;
 
   Future<Uint8List> _downloadThumb(String url) async {
     if (url == _lastThumbUrl && _lastThumbBytes != null) return _lastThumbBytes!;
+    HttpClient? client;
     try {
-      final client = HttpClient();
+      client = HttpClient();
       client.connectionTimeout = const Duration(seconds: 8);
       final request = await client.getUrl(Uri.parse(url));
       final response = await request.close().timeout(const Duration(seconds: 10));
@@ -688,12 +706,13 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         return result;
       }
     } catch (_) {}
+    finally { client?.close(force: true); }
     return Uint8List(0);
   }
 
-  void _extractColorsFromArtwork(Uint8List bytes, BuildContext context) {
-    if (bytes == _lastArtworkBytes) return;
-    _lastArtworkBytes = bytes;
+  void _extractColorsFromArtwork(String songId, Uint8List bytes, BuildContext context) {
+    if (songId == _lastArtworkSongId) return;
+    _lastArtworkSongId = songId;
     PaletteGenerator.fromImageProvider(
       MemoryImage(bytes),
       maximumColorCount: 8,
@@ -2194,12 +2213,12 @@ class _ComicBarPainter extends CustomPainter {
     final path = Path();
     final inner = r * 0.35;
     for (int i = 0; i < 4; i++) {
-      final angle = i * 3.14159 / 2;
-      final outerX = cx + r * _cos(angle);
-      final outerY = cy + r * _sin(angle);
-      final midAngle = angle + 3.14159 / 4;
-      final midX = cx + inner * _cos(midAngle);
-      final midY = cy + inner * _sin(midAngle);
+      final angle = i * math.pi / 2;
+      final outerX = cx + r * math.cos(angle);
+      final outerY = cy + r * math.sin(angle);
+      final midAngle = angle + math.pi / 4;
+      final midX = cx + inner * math.cos(midAngle);
+      final midY = cy + inner * math.sin(midAngle);
       if (i == 0) {
         path.moveTo(outerX, outerY);
       } else {
@@ -2209,27 +2228,6 @@ class _ComicBarPainter extends CustomPainter {
     }
     path.close();
     canvas.drawPath(path, paint);
-  }
-
-  double _cos(double a) {
-    // Simple cosine for 0, pi/2, pi, 3pi/2
-    final normalized = a % (2 * 3.14159);
-    if (normalized < 0.01 || (normalized - 2 * 3.14159).abs() < 0.01) return 1.0;
-    if ((normalized - 3.14159 / 2).abs() < 0.01) return 0.0;
-    if ((normalized - 3.14159).abs() < 0.01) return -1.0;
-    if ((normalized - 3 * 3.14159 / 2).abs() < 0.01) return 0.0;
-    // Approximate for other angles
-    return _cosApprox(normalized);
-  }
-
-  double _sin(double a) => _cos(a - 3.14159 / 2);
-
-  double _cosApprox(double x) {
-    // Taylor series approximation
-    x = x % (2 * 3.14159);
-    if (x > 3.14159) x -= 2 * 3.14159;
-    final x2 = x * x;
-    return 1.0 - x2 / 2.0 + x2 * x2 / 24.0 - x2 * x2 * x2 / 720.0;
   }
 
   @override

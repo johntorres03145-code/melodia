@@ -81,9 +81,13 @@ class QueueScreen extends StatelessWidget {
     Color secondary,
     Color accent,
   ) {
-    return ListView.builder(
+    return ReorderableListView.builder(
       padding: const EdgeInsets.only(bottom: 80),
       itemCount: orderedList.length,
+      onReorder: (oldIndex, newIndex) {
+        if (newIndex > oldIndex) newIndex--;
+        player.reorderQueue(oldIndex, newIndex);
+      },
       itemBuilder: (context, index) {
         final song = orderedList[index] as LocalSong;
         final isCurrent = index == currentOrderedIdx;
@@ -101,7 +105,6 @@ class QueueScreen extends StatelessWidget {
             child: const Icon(Icons.delete, color: Colors.white),
           ),
           onDismissed: (_) {
-            // Find real index in original queue
             final realIdx = player.queue.indexOf(song);
             if (realIdx >= 0) player.removeFromQueue(realIdx);
           },
@@ -115,12 +118,18 @@ class QueueScreen extends StatelessWidget {
             subtitle: song.artist.isEmpty ? 'Desconocido' : song.artist,
             trailing: isCurrent
                 ? null
-                : Text(
-                    '${index + 1}',
-                    style: TextStyle(fontSize: 12, color: secondary),
+                : Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${index + 1}',
+                        style: TextStyle(fontSize: 12, color: secondary),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.drag_handle, size: 18, color: secondary),
+                    ],
                   ),
             onTap: isCurrent ? null : () {
-              // Find real index in original queue for skipToIndex
               final realIdx = player.queue.indexOf(song);
               if (realIdx >= 0) player.skipToIndex(realIdx);
             },

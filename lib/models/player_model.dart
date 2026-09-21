@@ -189,7 +189,12 @@ class PlayerModel extends ChangeNotifier {
     });
     _indexSub = _player.currentIndexStream.listen((idx) {
       if (idx == null) return;
-      if (_isCrossfading || _isSettingSource) return;
+      if (_isCrossfading) return;
+      if (_isSettingSource) {
+        // Primer evento del nuevo player post-crossfade: resetear flag
+        _isSettingSource = false;
+        return;
+      }
       if (_source == TrackSource.local && idx >= 0 && idx < _queue.length) {
         final prev = _currentIndex;
         _currentIndex = idx;
@@ -904,14 +909,9 @@ class PlayerModel extends ChangeNotifier {
     _handler?.rebindPlayer(nextPlayer);
     _syncCurrentToHandler();
     _isCrossfading = false;
-    // Proteger _indexSub del nuevo player durante las primeras emisiones
-    _isSettingSource = true;
+    _isSettingSource = false;
     debugPrint('[CROSSFADE] Swap complete. Playing: "${nextSong.title}" (index=$_currentIndex)');
     notifyListeners();
-    // Liberar protección después de que el nuevo player esté estable
-    Future.delayed(const Duration(milliseconds: 2000), () {
-      _isSettingSource = false;
-    });
   }
 
   void _cancelCrossfade() {
@@ -935,6 +935,7 @@ class PlayerModel extends ChangeNotifier {
     _cancelCrossfade();
     _ytAudioService.dispose();
     _ytUrlCache.close();
+    _handler?.dispose();
     _player.dispose();
     super.dispose();
   }

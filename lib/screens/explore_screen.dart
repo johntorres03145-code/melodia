@@ -30,10 +30,12 @@ class _ExploreScreenState extends State<ExploreScreen> {
   bool _loading = false;
   String? _error;
   String? _loadingVideoId;
+  int _searchGeneration = 0;
 
   Future<void> _submit(String query) async {
     final q = query.trim();
     if (q.isEmpty) return;
+    final generation = ++_searchGeneration;
     setState(() {
       _loading = true;
       _error = null;
@@ -45,14 +47,14 @@ class _ExploreScreenState extends State<ExploreScreen> {
       final playlistsFuture = _search.searchPlaylists(q);
       final results = await resultsFuture;
       final playlists = await playlistsFuture;
-      if (!mounted) return;
+      if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _results = results;
         _playlists = playlists;
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || generation != _searchGeneration) return;
       setState(() {
         _loading = false;
         _error = 'No pude buscar: $e';
