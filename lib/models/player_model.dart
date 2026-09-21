@@ -35,6 +35,7 @@ class PlayerModel extends ChangeNotifier {
   Timer? _crossfadeTimer;
   AudioPlayer? _crossfadeNextPlayer;
   bool _crossfadeTriggeredForSong = false;
+  Duration _crossfadeNextDuration = Duration.zero;
 
   // ── Protección de transición ──
   bool _isSettingSource = false;
@@ -94,7 +95,12 @@ class PlayerModel extends ChangeNotifier {
   PlayerRepeatMode get repeat => _repeat;
   bool get shuffle => _shuffle;
   Duration get position => _position;
-  Duration get duration => _player.duration ?? Duration.zero;
+  Duration get duration {
+    if (_isCrossfading && _crossfadeNextDuration > Duration.zero) {
+      return _crossfadeNextDuration;
+    }
+    return _player.duration ?? Duration.zero;
+  }
   bool get isCrossfading => _isCrossfading;
   bool get crossfadeEnabled => _crossfadeEnabled;
   bool get isLoadingYouTube => _isLoadingYouTube;
@@ -813,8 +819,7 @@ class PlayerModel extends ChangeNotifier {
     dst.setEnabled(true);
   }
 
-  /// Crossfade optimizado: crea un segundo reproductor temporal, mezcla volumen
-  /// entre ambos, y al terminar intercambia el reproductor principal.
+  /// Crossfade estilo Lark Player: cambia UI inmediatamente, audio se mezcla gradualmente.
   Future<void> _crossfadeTo(LocalSong nextSong) async {
     debugPrint('[CROSSFADE] _crossfadeTo START: "${nextSong.title}"');
     if (_isCrossfading) _cancelCrossfade();
@@ -829,8 +834,11 @@ class PlayerModel extends ChangeNotifier {
       return;
     }
 
-    // NO actualizar _currentIndex aquí — se actualiza en _swapCrossfadePlayer
-    // para que la UI muestre la canción vieja hasta que el audio cambie
+    // Cambiar UI INMEDIATAMENTE: artwork, nombre, barra de progreso
+    _currentIndex = nextIdx;
+    _position = Duration.zero;
+    _syncCurrentToHandler();
+    notifyListeners();
 
     // Clonar ecualizador (fire-and-forget con timeout corto)
     AndroidEqualizer? newEqualizer;
@@ -852,15 +860,22 @@ class PlayerModel extends ChangeNotifier {
     _crossfadeNextPlayer = nextPlayer;
     try {
       await nextPlayer.setUrl(nextSong.path);
+      _crossfadeNextDuration = nextPlayer.duration ?? Duration.zero;
       nextPlayer.setVolume(0.0);
       nextPlayer.play();
+
+      // Escuchar posición del nuevo player para la barra de progreso
+      StreamSubscription? nextPosSub;
+      nextPosSub = nextPlayer.positionStream.listen((p) {
+        if (_isCrossfading) _position = p;
+      });
 
       final durationMs = _crossfadeSecs * 1000;
       final steps = 20;
       final stepMs = (durationMs / steps).toInt();
       debugPrint('[CROSSFADE] Ramp: ${_crossfadeSecs}s, $steps steps, ${stepMs}ms each');
 
-      // Ramp sin Completer — el swap se hace inline en el callback del timer
+      // Ramp: viejo baja volumen, nuevo sube
       _crossfadeTimer = Timer.periodic(Duration(milliseconds: stepMs), (timer) {
         if (_crossfadeNextPlayer == null) { timer.cancel(); return; }
         final t = timer.tick / steps;
@@ -868,6 +883,7 @@ class PlayerModel extends ChangeNotifier {
         if (t >= 1.0) {
           timer.cancel();
           _crossfadeTimer = null;
+          nextPosSub?.cancel();
           try { nextPlayer.setVolume(1.0); } catch (_) {}
           _swapCrossfadePlayer(nextPlayer, newEqualizer, nextSong);
           return;
@@ -881,6 +897,7 @@ class PlayerModel extends ChangeNotifier {
       debugPrint('[CROSSFADE] ERROR: $e');
       nextPlayer.dispose();
       _crossfadeNextPlayer = null;
+      _crossfadeNextDuration = Duration.zero;
       _isCrossfading = false;
       _syncCurrentToHandler();
       notifyListeners();
@@ -891,6 +908,7 @@ class PlayerModel extends ChangeNotifier {
   void _swapCrossfadePlayer(AudioPlayer nextPlayer, AndroidEqualizer? newEqualizer, LocalSong nextSong) {
     debugPrint('[CROSSFADE] Swapping players → "${nextSong.title}"');
     _crossfadeNextPlayer = null;
+    _crossfadeNextDuration = Duration.zero;
 
     // Dispose fire-and-forget del player viejo
     try { _player.setVolume(1.0); } catch (_) {}
@@ -900,10 +918,6 @@ class PlayerModel extends ChangeNotifier {
     if (newEqualizer != null) {
       _equalizer = newEqualizer;
     }
-
-    // Actualizar _currentIndex de forma atómica con el swap del player
-    final newIdx = _queue.indexWhere((s) => s.id == nextSong.id);
-    if (newIdx >= 0) _currentIndex = newIdx;
 
     _position = nextPlayer.position;
     _setupListeners();
@@ -920,6 +934,7 @@ class PlayerModel extends ChangeNotifier {
     _crossfadeTimer = null;
     try { _crossfadeNextPlayer?.dispose(); } catch (_) {}
     _crossfadeNextPlayer = null;
+    _crossfadeNextDuration = Duration.zero;
     _isCrossfading = false;
     _crossfadeTriggeredForSong = false;
     _isSettingSource = false;
