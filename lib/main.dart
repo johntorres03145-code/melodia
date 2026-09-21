@@ -95,6 +95,7 @@ Future<void> main() async {
   audioHandler.attachLibrary(libraryModel);
   audioHandler.attachFavorites(favoritesProvider);
   audioHandler.attachPlayHistory(playHistory);
+  audioHandler.attachPlaylists(playlistModel);
 
   const ytApiKey = String.fromEnvironment('YOUTUBE_API_KEY');
   if (ytApiKey.isNotEmpty) {

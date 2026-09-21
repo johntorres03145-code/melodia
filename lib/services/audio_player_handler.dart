@@ -9,6 +9,7 @@ import '../models/favorites_model.dart';
 import '../models/library_model.dart';
 import '../models/play_history_model.dart';
 import '../models/player_model.dart';
+import '../models/playlist_model.dart';
 import '../models/song.dart';
 import 'youtube_audio_service.dart';
 import 'youtube_search.dart';
@@ -20,6 +21,9 @@ const _catArtists = 'cat_artists';
 const _catFavorites = 'cat_favorites';
 const _catRecent = 'cat_recent';
 const _catRecentAA = 'recent';
+const _catTopPlayed = 'cat_top_played';
+const _catPlaylists = 'cat_playlists';
+const _catPlaylistItems = 'playlist_';
 
 class AudioPlayerHandler extends BaseAudioHandler {
   AudioPlayer player;
@@ -27,6 +31,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
   LibraryModel? _library;
   FavoritesModel? _favorites;
   PlayHistoryModel? _playHistory;
+  PlaylistModel? _playlists;
   YouTubeSearch? _ytSearch;
   final YouTubeAudioService _ytAudioService = YouTubeAudioService();
   StreamSubscription? _eventSub;
@@ -81,6 +86,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
   void attachLibrary(LibraryModel library) => _library = library;
   void attachFavorites(FavoritesModel favorites) => _favorites = favorites;
   void attachPlayHistory(PlayHistoryModel history) => _playHistory = history;
+  void attachPlaylists(PlaylistModel playlists) => _playlists = playlists;
   void attachYouTubeSearch(YouTubeSearch search) => _ytSearch = search;
 
   // ═══════════════════ ANDROID AUTO BROWSING ═══════════════════
@@ -102,8 +108,15 @@ class AudioPlayerHandler extends BaseAudioHandler {
       case _catRecent:
       case _catRecentAA:
         return _getRecent();
+      case _catTopPlayed:
+        return _getTopPlayed();
+      case _catPlaylists:
+        return _getPlaylists();
       default:
-        if (parentMediaId.startsWith('album_')) {
+        if (parentMediaId.startsWith(_catPlaylistItems)) {
+          return _getPlaylistSongs(
+              parentMediaId.substring(_catPlaylistItems.length));
+        } else if (parentMediaId.startsWith('album_')) {
           return _getSongsByAlbum(parentMediaId.substring(6));
         } else if (parentMediaId.startsWith('artist_')) {
           return _getSongsByArtist(parentMediaId.substring(7));
@@ -120,6 +133,9 @@ class AudioPlayerHandler extends BaseAudioHandler {
     final favCount = _favorites?.songs.length ?? 0;
     final recentCount = _playHistory != null
         ? _playHistory!.getRecentlyPlayed(lib?.allSongs ?? [], limit: 50).length
+        : 0;
+    final topPlayedCount = _playHistory != null
+        ? _playHistory!.getTopPlayed(lib?.allSongs ?? [], limit: 50).length
         : 0;
 
     return [
@@ -151,6 +167,18 @@ class AudioPlayerHandler extends BaseAudioHandler {
         id: _catRecent,
         title: 'Recientes',
         displaySubtitle: '$recentCount canciones',
+        playable: false,
+      ),
+      MediaItem(
+        id: _catTopPlayed,
+        title: 'Más escuchadas',
+        displaySubtitle: '$topPlayedCount canciones',
+        playable: false,
+      ),
+      MediaItem(
+        id: _catPlaylists,
+        title: 'Playlists',
+        displaySubtitle: '${_playlists?.all.length ?? 0} playlists',
         playable: false,
       ),
     ];
@@ -207,6 +235,38 @@ class AudioPlayerHandler extends BaseAudioHandler {
     final lib = _library;
     if (hist == null || lib == null) return [];
     return _songsToMediaItems(hist.getRecentlyPlayed(lib.allSongs, limit: 50));
+  }
+
+  Future<List<MediaItem>> _getTopPlayed() async {
+    final hist = _playHistory;
+    final lib = _library;
+    if (hist == null || lib == null) return [];
+    return _songsToMediaItems(hist.getTopPlayed(lib.allSongs, limit: 50));
+  }
+
+  Future<List<MediaItem>> _getPlaylists() async {
+    final playlists = _playlists;
+    if (playlists == null) return [];
+    return playlists.all.map((p) => MediaItem(
+          id: '${_catPlaylistItems}${p.id}',
+          title: p.name,
+          displaySubtitle: '${p.count} canciones',
+          playable: false,
+        )).toList();
+  }
+
+  Future<List<MediaItem>> _getPlaylistSongs(String playlistId) async {
+    final playlists = _playlists;
+    final lib = _library;
+    if (playlists == null || lib == null) return [];
+    final playlist = playlists.getById(playlistId);
+    if (playlist == null) return [];
+    final songMap = {for (final s in lib.allSongs) s.id.toString(): s};
+    final songs = playlist.songIds
+        .map((id) => songMap[id])
+        .whereType<LocalSong>()
+        .toList();
+    return _songsToMediaItems(songs);
   }
 
   Future<List<MediaItem>> _songsToMediaItems(List<LocalSong> songs) async {
