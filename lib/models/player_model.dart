@@ -171,9 +171,11 @@ class PlayerModel extends ChangeNotifier {
     _indexSub?.cancel();
     _stateSub = _player.playerStateStream.listen((_) => notifyListeners());
     _posSub = _player.positionStream.listen((p) {
+      // Durante crossfade: NO sobreescribir _position (lo controla nextPosSub)
+      if (_isCrossfading) return;
       _position = p;
       // Crossfade: detectar cuando faltan _crossfadeSecs para el final
-      if (_crossfadeEnabled && !_isCrossfading && !_crossfadeTriggeredForSong) {
+      if (_crossfadeEnabled && !_crossfadeTriggeredForSong) {
         final dur = _player.duration;
         if (dur != null && dur > Duration.zero && _source == TrackSource.local) {
           final remaining = dur - p;

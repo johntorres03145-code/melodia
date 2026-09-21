@@ -73,6 +73,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     // Buscar letras cuando cambia la canción (fuera del build)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchLyricsIfNeeded(song, ytVideo);
+      _extractColorsForCurrentSong(song, ytVideo, context);
     });
 
     if (player.playing) {
@@ -724,6 +725,24 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         context.read<ThemeProvider>().setAutoColorFromArtwork(dominant, vibrant);
       }
     }).catchError((_) {});
+  }
+
+  void _extractColorsForCurrentSong(LocalSong? song, YouTubeVideo? ytVideo, BuildContext context) {
+    if (song != null) {
+      final songId = 'local_${song.id}';
+      if (songId == _lastArtworkSongId) return;
+      context.read<LibraryModel>().songArtworkFor(song.id, albumId: song.albumId).then((bytes) {
+        if (!mounted || bytes == null) return;
+        _extractColorsFromArtwork(songId, bytes, context);
+      }).catchError((_) {});
+    } else if (ytVideo != null && ytVideo.thumb.isNotEmpty) {
+      final songId = ytVideo.videoId;
+      if (songId == _lastArtworkSongId) return;
+      _downloadThumb(ytVideo.thumb).then((bytes) {
+        if (!mounted || bytes == null) return;
+        _extractColorsFromArtwork(songId, bytes, context);
+      }).catchError((_) {});
+    }
   }
 
   Widget _topBar(BuildContext context, PlayerModel player, ThemeProvider theme) {
