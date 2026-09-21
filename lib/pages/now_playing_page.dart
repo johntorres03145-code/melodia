@@ -41,7 +41,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   String? _lastLyricsKey;
   final Map<int, Future<dynamic>> _artworkFutures = {};
   final ScrollController _lyricsScrollController = ScrollController();
-  String? _frozenArtworkSongId;
 
   @override
   void initState() {
@@ -71,17 +70,10 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     final song = player.current;
     final ytVideo = player.currentYouTube;
 
-    // Durante crossfade: congelar artwork en la canción vieja para evitar flicker
-    if (player.isCrossfading) {
-      _frozenArtworkSongId ??= song != null ? 'local_${song.id}'
-          : ytVideo != null ? 'yt_${ytVideo.videoId}' : null;
-    } else {
-      _frozenArtworkSongId = null;
-    }
-
-    // Buscar letras cuando cambia la canción (fuera del build)
+    // Buscar letras y extraer colores cuando cambia la canción (fuera del build)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchLyricsIfNeeded(song, ytVideo);
+      _extractColorsForCurrentSong(song, ytVideo, context);
     });
 
     if (player.playing) {
@@ -638,21 +630,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   Widget _artworkContent(BuildContext context, LocalSong? song, YouTubeVideo? ytVideo, double size,
       {Color? fallback}) {
-    // Durante crossfade: buscar la canción vieja en la cola para no cambiar portada
-    LocalSong? artworkSong = song;
-    if (_frozenArtworkSongId != null) {
-      final player = context.read<PlayerModel>();
-      if (player.isCrossfading) {
-        artworkSong = null;
-        for (final s in player.queue) {
-          if ('local_${s.id}' == _frozenArtworkSongId) {
-            artworkSong = s;
-            break;
-          }
-        }
-      }
-    }
-
     // YouTube: descargar thumbnail y extraer colores
     if (ytVideo != null && ytVideo.thumb.isNotEmpty) {
       return FutureBuilder<Uint8List>(
@@ -684,15 +661,15 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       );
     }
     // Local: usar la carátula del álbum
-    if (artworkSong != null) {
-      _artworkFutures.putIfAbsent(artworkSong.id, () =>
-          context.read<LibraryModel>().songArtworkFor(artworkSong!.id, albumId: artworkSong.albumId));
+    if (song != null) {
+      _artworkFutures.putIfAbsent(song.id, () =>
+          context.read<LibraryModel>().songArtworkFor(song.id, albumId: song.albumId));
       return FutureBuilder<dynamic>(
-        future: _artworkFutures[artworkSong.id],
+        future: _artworkFutures[song.id],
         builder: (context, snap) {
           if (snap.hasData && snap.data != null) {
             final bytes = snap.data as Uint8List;
-            _extractColorsFromArtwork('local_${artworkSong!.id}', bytes, context);
+            _extractColorsFromArtwork('local_${song.id}', bytes, context);
             return Image.memory(bytes, fit: BoxFit.cover,
                 width: size, height: size,
                 filterQuality: FilterQuality.high,
@@ -748,6 +725,24 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         context.read<ThemeProvider>().setAutoColorFromArtwork(dominant, vibrant);
       }
     }).catchError((_) {});
+  }
+
+  void _extractColorsForCurrentSong(LocalSong? song, YouTubeVideo? ytVideo, BuildContext context) {
+    if (song != null) {
+      final songId = 'local_${song.id}';
+      if (songId == _lastArtworkSongId) return;
+      context.read<LibraryModel>().songArtworkFor(song.id, albumId: song.albumId).then((bytes) {
+        if (!mounted || bytes == null) return;
+        _extractColorsFromArtwork(songId, bytes, context);
+      }).catchError((_) {});
+    } else if (ytVideo != null && ytVideo.thumb.isNotEmpty) {
+      final songId = ytVideo.videoId;
+      if (songId == _lastArtworkSongId) return;
+      _downloadThumb(ytVideo.thumb).then((bytes) {
+        if (!mounted || bytes.isEmpty) return;
+        _extractColorsFromArtwork(songId, bytes, context);
+      }).catchError((_) {});
+    }
   }
 
   Widget _topBar(BuildContext context, PlayerModel player, ThemeProvider theme) {
