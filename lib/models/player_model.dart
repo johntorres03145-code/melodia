@@ -44,13 +44,16 @@ class PlayerModel extends ChangeNotifier {
   int _colorExtractionGeneration = 0;
   int _lastExtractedGeneration = -1;
 
-  // ── Crossfade ──
+  // ── Crossfade (single-player) ──
   int _crossfadeSecs = 0;
   bool _crossfadeEnabled = false;
   bool _isCrossfading = false;
   Timer? _crossfadeTimer;
-  AudioPlayer? _crossfadeNextPlayer;
   bool _crossfadeTriggeredForSong = false;
+
+  // ── Watchdog: auto-advance si el player se traba ──
+  Timer? _stuckTimer;
+  Duration _lastWatchdogPosition = Duration.zero;
 
   // ── Protección de transición ──
   bool _isSettingSource = false;
@@ -112,12 +115,7 @@ class PlayerModel extends ChangeNotifier {
   bool get shuffle => _shuffleMode != ShuffleMode.off;
   ShuffleMode get shuffleMode => _shuffleMode;
   Duration get position => _position;
-  Duration get duration {
-    if (_isCrossfading && _crossfadeNextPlayer != null) {
-      return _crossfadeNextPlayer!.duration ?? Duration.zero;
-    }
-    return _player.duration ?? Duration.zero;
-  }
+  Duration get duration => _player.duration ?? Duration.zero;
   bool get isCrossfading => _isCrossfading;
   bool get crossfadeEnabled => _crossfadeEnabled;
   bool get isLoadingYouTube => _isLoadingYouTube;
@@ -186,11 +184,20 @@ class PlayerModel extends ChangeNotifier {
     _posSub?.cancel();
     _processSub?.cancel();
     _indexSub?.cancel();
-    _stateSub = _player.playerStateStream.listen((_) => notifyListeners());
+    _stateSub = _player.playerStateStream.listen((s) {
+      if (_isCrossfading) return;
+      notifyListeners();
+      if (_player.playing) {
+        _startWatchdog();
+      } else {
+        _stopWatchdog();
+      }
+    });
     _posSub = _player.positionStream.listen((p) {
-      if (_isCrossfading) return; // ignore during crossfade — timer updates _position
+      if (_isCrossfading) return;
       _position = p;
       _checkCrossfadeTrigger();
+      _lastWatchdogPosition = p;
       notifyListeners();
     });
     _processSub = _player.processingStateStream.listen((p) {
@@ -354,9 +361,9 @@ class PlayerModel extends ChangeNotifier {
     _extractColorsForCurrentSong();
   }
 
-  // ═══════════════════ CROSSFADE ═══════════════════
+  // ═══════════════════ CROSSFADE (SINGLE PLAYER) ═══════════════════
 
-  /// Verifica si es momento de iniciar el crossfade (posición alcanzó el punto de corte).
+  /// Verifica si es momento de iniciar el crossfade.
   void _checkCrossfadeTrigger() {
     if (!_crossfadeEnabled || _crossfadeSecs <= 0 || _isCrossfading) return;
     if (_crossfadeTriggeredForSong) return;
@@ -384,7 +391,8 @@ class PlayerModel extends ChangeNotifier {
     }
   }
 
-  /// Inicia el crossfade: crea segundo player, rampa de volumen, swap al finalizar.
+  /// Crossfade single-player: fade out → cambiar canción → fade in.
+  /// Todo ocurre en el MISMO player, sin crear segundos players.
   Future<void> _crossfadeTo(LocalSong nextSong) async {
     if (_isCrossfading || !_crossfadeEnabled || _crossfadeSecs <= 0) return;
     final nextIdx = nextQueueIndex;
@@ -395,85 +403,24 @@ class PlayerModel extends ChangeNotifier {
     debugPrint('[CROSSFADE] Starting → "${nextSong.title}" (${_crossfadeSecs}s)');
 
     try {
-      // 1. Crear segundo player
-      final nextPlayer = AudioPlayer();
-
-      // 2. Copiar equalizer al nuevo player (con timeout)
-      if (_equalizer != null) {
-        try {
-          final newEq = AndroidEqualizer();
-          final copyResult = await _withTimeout(
-            _copyEqualizerBands(_equalizer!, newEq).then((_) => true),
-            const Duration(seconds: 3),
-          );
-          if (copyResult != null) _equalizer = newEq;
-        } catch (_) {}
-      }
-
-      // 3. Cargar siguiente canción (con timeout de 5s)
-      final setUrlOk = await _withTimeout(
-        nextPlayer.setUrl(nextSong.path).then((_) => true),
-        const Duration(seconds: 5),
-      );
-      if (setUrlOk == null) {
-        debugPrint('[CROSSFADE] setUrl timed out');
-        await nextPlayer.dispose();
-        _cancelCrossfade();
-        _advanceIfOldPlayerDone();
-        return;
-      }
-
-      await nextPlayer.setVolume(0.0);
-      await nextPlayer.setSpeed(_speed);
-
-      // Guardar referencia antes de play
-      _crossfadeNextPlayer = nextPlayer;
-
-      // 4. Actualizar currentIndex (UI cambia INMEDIATAMENTE)
-      _currentIndex = nextIdx;
-      _syncCurrentToHandler();
-      _triggerColorExtraction();
-      notifyListeners();
-
-      // 5. Play (con timeout)
-      final playOk = await _withTimeout(
-        nextPlayer.play().then((_) => true),
-        const Duration(seconds: 3),
-      );
-      if (playOk == null) {
-        debugPrint('[CROSSFADE] play() timed out');
-        await nextPlayer.dispose();
-        _cancelCrossfade();
-        _advanceIfOldPlayerDone();
-        return;
-      }
-
-      // 6. Rampa de volumen
-      final fadeDurationMs = _crossfadeSecs * 1000;
+      final fadeOutMs = (_crossfadeSecs * 500).clamp(200, 4000); // mitad del tiempo en fade out
       const stepMs = 50;
-      final totalSteps = fadeDurationMs ~/ stepMs;
+      final totalSteps = fadeOutMs ~/ stepMs;
       var step = 0;
 
+      // Fase 1: Fade out de la canción actual
       _crossfadeTimer = Timer.periodic(const Duration(milliseconds: stepMs), (timer) {
         try {
           step++;
           final t = (step / totalSteps).clamp(0.0, 1.0);
-
-          // Fade out player viejo
           try { _player.setVolume(1.0 - t); } catch (_) {}
-          // Fade in player nuevo
-          try { _crossfadeNextPlayer?.setVolume(t); } catch (_) {}
-
-          // Posición viene del player nuevo (UI muestra nueva canción)
-          _position = _crossfadeNextPlayer?.position ?? Duration.zero;
-          notifyListeners();
-
+          if (step % 4 == 0) notifyListeners();
           if (step >= totalSteps) {
             timer.cancel();
-            _completeCrossfade(nextSong);
+            _crossfadeTransition(nextSong);
           }
         } catch (e) {
-          debugPrint('[CROSSFADE] Timer error: $e');
+          debugPrint('[CROSSFADE] Fade-out error: $e');
           timer.cancel();
           _cancelCrossfade();
           _advanceIfOldPlayerDone();
@@ -486,55 +433,125 @@ class PlayerModel extends ChangeNotifier {
     }
   }
 
-  /// Si el player viejo ya terminó y el crossfade falló, avanzar a la siguiente.
-  void _advanceIfOldPlayerDone() {
-    try {
-      final state = _player.processingState;
-      if (state == ProcessingState.completed) {
-        debugPrint('[CROSSFADE] Old player completed → auto-advancing');
-        Future.microtask(() => next());
-      }
-    } catch (_) {
-      // Si no podemos leer el estado, intentar avanzar de todas formas
-      Future.microtask(() => next());
+  /// Fase 2: Cambiar canción en el mismo player y hacer fade in.
+  Future<void> _crossfadeTransition(LocalSong nextSong) async {
+    final nextIdx = nextQueueIndex;
+    if (nextIdx < 0 || nextIdx >= _queue.length) {
+      debugPrint('[CROSSFADE] No next song → finishing');
+      _completeCrossfade();
+      return;
     }
+
+    // Cambiar canción en el mismo player
+    final loadOk = await _withTimeout(
+      _player.setUrl(nextSong.path).then((_) => true),
+      const Duration(seconds: 5),
+    );
+    if (loadOk == null) {
+      debugPrint('[CROSSFADE] setUrl timed out during transition');
+      _cancelCrossfade();
+      _advanceIfOldPlayerDone();
+      return;
+    }
+
+    // Actualizar índice y UI
+    _currentIndex = nextIdx;
+    _position = Duration.zero;
+    _syncCurrentToHandler();
+    _triggerColorExtraction();
+    notifyListeners();
+
+    // Play
+    final playOk = await _withTimeout(
+      _player.play().then((_) => true),
+      const Duration(seconds: 3),
+    );
+    if (playOk == null) {
+      debugPrint('[CROSSFADE] play() timed out during transition');
+      _cancelCrossfade();
+      _advanceIfOldPlayerDone();
+      return;
+    }
+
+    // Fase 3: Fade in de la nueva canción
+    final fadeInMs = (_crossfadeSecs * 500).clamp(200, 4000);
+    const stepMs = 50;
+    final totalSteps = fadeInMs ~/ stepMs;
+    var step = 0;
+
+    _crossfadeTimer = Timer.periodic(const Duration(milliseconds: stepMs), (timer) {
+      try {
+        step++;
+        final t = (step / totalSteps).clamp(0.0, 1.0);
+        try { _player.setVolume(t); } catch (_) {}
+        if (step % 4 == 0) notifyListeners();
+        if (step >= totalSteps) {
+          timer.cancel();
+          _completeCrossfade();
+        }
+      } catch (e) {
+        debugPrint('[CROSSFADE] Fade-in error: $e');
+        timer.cancel();
+        _completeCrossfade();
+      }
+    });
   }
 
-  /// Completa el crossfade: dispose player viejo, nuevo es el primario.
-  Future<void> _completeCrossfade(LocalSong nextSong) async {
+  void _completeCrossfade() {
     _crossfadeTimer?.cancel();
     _crossfadeTimer = null;
-    debugPrint('[CROSSFADE] Completing → "${nextSong.title}"');
-
-    // Dispose player viejo (fire-and-forget con timeout implícito)
-    try { _player.dispose(); } catch (_) {}
-
-    // Nuevo player es el primario
-    final nextPlayer = _crossfadeNextPlayer!;
-    _crossfadeNextPlayer = null;
-    _player = nextPlayer;
-
-    _position = _player.position;
-    _setupListeners();
-    _handler?.rebindPlayer(_player);
-    _syncCurrentToHandler();
     _isCrossfading = false;
     _crossfadeTriggeredForSong = false;
-    _isSettingSource = false;
-
-    debugPrint('[CROSSFADE] Done. Playing: "${nextSong.title}" (index=$_currentIndex)');
+    try { _player.setVolume(1.0); } catch (_) {}
+    debugPrint('[CROSSFADE] Done.');
     notifyListeners();
   }
 
   void _cancelCrossfade() {
     _crossfadeTimer?.cancel();
     _crossfadeTimer = null;
-    try { _crossfadeNextPlayer?.dispose(); } catch (_) {}
-    _crossfadeNextPlayer = null;
     _isCrossfading = false;
     _crossfadeTriggeredForSong = false;
-    _isSettingSource = false;
     try { _player.setVolume(1.0); } catch (_) {}
+  }
+
+  /// Si el player terminó y el crossfade falló, avanzar.
+  void _advanceIfOldPlayerDone() {
+    try {
+      final state = _player.processingState;
+      if (state == ProcessingState.completed) {
+        debugPrint('[CROSSFADE] Player completed → auto-advancing');
+        Future.microtask(() => next());
+      }
+    } catch (_) {
+      Future.microtask(() => next());
+    }
+  }
+
+  // ── Watchdog: auto-advance si el player se traba ──
+
+  void _startWatchdog() {
+    _stopWatchdog();
+    _lastWatchdogPosition = _player.position ?? Duration.zero;
+    _stuckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!_player.playing || _isCrossfading || _isSettingSource) return;
+      final pos = _player.position ?? Duration.zero;
+      final diff = (pos - _lastWatchdogPosition).abs();
+      if (diff < const Duration(seconds: 2)) {
+        // Posición no avanzó en 5 segundos — player trabado
+        debugPrint('[WATCHDOG] Player stuck at $pos → auto-advancing');
+        _stuckTimer?.cancel();
+        _stuckTimer = null;
+        next();
+      } else {
+        _lastWatchdogPosition = pos;
+      }
+    });
+  }
+
+  void _stopWatchdog() {
+    _stuckTimer?.cancel();
+    _stuckTimer = null;
   }
 
   // ═══════════════════ REPRODUCCIÓN LOCAL ═══════════════════
