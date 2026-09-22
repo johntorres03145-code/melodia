@@ -41,6 +41,8 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   String? _lastLyricsKey;
   final Map<int, Future<dynamic>> _artworkFutures = {};
   final ScrollController _lyricsScrollController = ScrollController();
+  int _colorExtractionGeneration = 0;
+  int? _previousSongId;
 
   @override
   void initState() {
@@ -70,10 +72,18 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     final song = player.current;
     final ytVideo = player.currentYouTube;
 
+    // Detectar cambio de canción e incrementar generation
+    final currentSongId = song?.id ?? ytVideo?.videoId.hashCode;
+    if (currentSongId != null && currentSongId != _previousSongId) {
+      _previousSongId = currentSongId;
+      _colorExtractionGeneration++;
+    }
+
     // Buscar letras y extraer colores cuando cambia la canción (fuera del build)
+    final gen = _colorExtractionGeneration;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchLyricsIfNeeded(song, ytVideo);
-      _extractColorsForCurrentSong(song, ytVideo, context);
+      _extractColorsForCurrentSong(song, ytVideo, context, gen);
     });
 
     if (player.playing) {
@@ -636,7 +646,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         future: _downloadThumb(ytVideo.thumb),
         builder: (context, snap) {
           if (snap.hasData && snap.data != null) {
-            _extractColorsFromArtwork(ytVideo.videoId, snap.data!, context);
             return Image.memory(snap.data!,
                 fit: BoxFit.cover,
                 width: size,
@@ -669,7 +678,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
         builder: (context, snap) {
           if (snap.hasData && snap.data != null) {
             final bytes = snap.data as Uint8List;
-            _extractColorsFromArtwork('local_${song.id}', bytes, context);
             return Image.memory(bytes, fit: BoxFit.cover,
                 width: size, height: size,
                 filterQuality: FilterQuality.high,
@@ -683,8 +691,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     return Icon(Icons.music_note, size: size * 0.3, color: context.read<ThemeProvider>().isDarkMode ? Colors.white24 : Colors.black26);
   }
 
-  // Cache para no re-extraer el mismo artwork
-  String _lastArtworkSongId = '';
+  // Cache para no re-descargar el mismo thumbnail
   String _lastThumbUrl = '';
   Uint8List? _lastThumbBytes;
 
@@ -711,14 +718,14 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     return Uint8List(0);
   }
 
-  void _extractColorsFromArtwork(String songId, Uint8List bytes, BuildContext context) {
-    if (songId == _lastArtworkSongId) return;
-    _lastArtworkSongId = songId;
+  void _extractColorsFromArtwork(String songId, Uint8List bytes, BuildContext context, int generation) {
     PaletteGenerator.fromImageProvider(
       MemoryImage(bytes),
       maximumColorCount: 8,
     ).then((palette) {
       if (!mounted) return;
+      // Verificar que la canción no haya cambiado mientras se extraían los colores
+      if (generation != _colorExtractionGeneration) return;
       final dominant = palette.dominantColor?.color ?? MelodiaColors.midnight;
       final vibrant = palette.vibrantColor?.color ?? palette.lightVibrantColor?.color ?? MelodiaColors.violetLight;
       if (context.mounted) {
@@ -727,20 +734,16 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     }).catchError((_) {});
   }
 
-  void _extractColorsForCurrentSong(LocalSong? song, YouTubeVideo? ytVideo, BuildContext context) {
+  void _extractColorsForCurrentSong(LocalSong? song, YouTubeVideo? ytVideo, BuildContext context, int generation) {
     if (song != null) {
-      final songId = 'local_${song.id}';
-      if (songId == _lastArtworkSongId) return;
       context.read<LibraryModel>().songArtworkFor(song.id, albumId: song.albumId).then((bytes) {
         if (!mounted || bytes == null) return;
-        _extractColorsFromArtwork(songId, bytes, context);
+        _extractColorsFromArtwork('local_${song.id}', bytes, context, generation);
       }).catchError((_) {});
     } else if (ytVideo != null && ytVideo.thumb.isNotEmpty) {
-      final songId = ytVideo.videoId;
-      if (songId == _lastArtworkSongId) return;
       _downloadThumb(ytVideo.thumb).then((bytes) {
         if (!mounted || bytes.isEmpty) return;
-        _extractColorsFromArtwork(songId, bytes, context);
+        _extractColorsFromArtwork(ytVideo.videoId, bytes, context, generation);
       }).catchError((_) {});
     }
   }
