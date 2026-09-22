@@ -51,8 +51,15 @@ class QueueScreen extends StatelessWidget {
         elevation: 0,
         actions: [
           IconButton(
-            icon: Icon(Icons.shuffle,
-                color: player.shuffle ? accent : secondary, size: 20),
+            icon: Icon(
+              player.shuffleMode == ShuffleMode.smart
+                  ? Icons.auto_awesome
+                  : Icons.shuffle,
+              color: player.shuffle
+                  ? (player.shuffleMode == ShuffleMode.smart ? Colors.amber : accent)
+                  : secondary,
+              size: 20,
+            ),
             onPressed: player.toggleShuffle,
           ),
         ],

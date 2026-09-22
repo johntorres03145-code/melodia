@@ -1081,9 +1081,22 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         IconButton(
-          icon: Icon(Icons.shuffle_rounded,
-              color: player.shuffle ? theme.effectiveAccent : MelodiaColors.textSecondary,
-              size: 26),
+          icon: Icon(
+            player.shuffleMode == ShuffleMode.smart
+                ? Icons.auto_awesome
+                : Icons.shuffle_rounded,
+            color: player.shuffle
+                ? (player.shuffleMode == ShuffleMode.smart
+                    ? Colors.amber
+                    : theme.effectiveAccent)
+                : MelodiaColors.textSecondary,
+            size: 26,
+          ),
+          tooltip: player.shuffleMode == ShuffleMode.off
+              ? 'Aleatorio off'
+              : player.shuffleMode == ShuffleMode.normal
+                  ? 'Aleatorio'
+                  : 'Smart Shuffle',
           onPressed: player.toggleShuffle,
         ),
         _LongPressSeekButton(
