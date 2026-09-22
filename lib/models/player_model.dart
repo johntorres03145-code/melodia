@@ -406,8 +406,11 @@ class PlayerModel extends ChangeNotifier {
     debugPrint('[CROSSFADE] Starting → "${nextSong.title}" (${_crossfadeSecs}s)');
 
     try {
-      // 1. Crear segundo player
-      final nextPlayer = AudioPlayer();
+      // 1. Crear segundo player SIN audio focus para que no pause al viejo
+      final nextPlayer = AudioPlayer(
+        androidApplyAudioAttributes: false,
+        handleAudioSessionActivation: false,
+      );
 
       // 2. Cargar canción siguiente
       final loadOk = await _withTimeout(

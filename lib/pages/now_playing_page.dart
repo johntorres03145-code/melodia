@@ -152,6 +152,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     final key = song?.id.toString() ?? ytVideo?.videoId;
     if (key == null || key == _lastLyricsKey) return;
     _lastLyricsKey = key;
+    _lyrics = null; // Limpiar letras viejas antes de fetch
     final artist = song?.artist ?? ytVideo?.channel ?? '';
     final title = song?.title ?? ytVideo?.title ?? '';
     _lyricsService.fetchLyrics(artist, title).then((l) {
