@@ -1,13 +1,20 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:palette_generator/palette_generator.dart';
 
+import '../core/theme/melodia_colors.dart';
+import '../core/theme/theme_provider.dart';
 import '../services/audio_player_handler.dart';
 import '../services/youtube_audio_service.dart';
 import '../services/youtube_search.dart';
 import '../services/yt_url_cache.dart';
+import 'library_model.dart';
 import 'play_history_model.dart';
 import 'song.dart';
 
@@ -27,6 +34,12 @@ class PlayerModel extends ChangeNotifier {
   AndroidEqualizer? _equalizer;
   AndroidLoudnessEnhancer? _loudnessEnhancer;
   bool _soundEnhancement = false;
+
+  // ── Dynamic color extraction ──
+  ThemeProvider? _themeProvider;
+  LibraryModel? _library;
+  int _colorExtractionGeneration = 0;
+  int _lastExtractedGeneration = -1;
 
   // ── Crossfade ──
   int _crossfadeSecs = 0;
@@ -186,6 +199,7 @@ class PlayerModel extends ChangeNotifier {
           _playHistory?.recordPlay(_queue[prev].id);
         }
         _syncCurrentToHandler();
+        _triggerColorExtraction();
         notifyListeners();
       }
     });
@@ -196,6 +210,8 @@ class PlayerModel extends ChangeNotifier {
       if (_currentIndex >= 0 && _currentIndex < _queue.length) {
         _playHistory?.recordPlay(_queue[_currentIndex].id);
       }
+      next();
+      return;
     } else if (_source == TrackSource.youtube) {
       next();
       return;
@@ -231,6 +247,12 @@ class PlayerModel extends ChangeNotifier {
     _handler = handler;
   }
 
+  /// Connects ThemeProvider for dynamic color extraction from artwork.
+  void attachTheme(ThemeProvider theme) => _themeProvider = theme;
+
+  /// Connects LibraryModel for fetching song artwork bytes.
+  void attachLibrary(LibraryModel library) => _library = library;
+
   void _syncToHandler() {
     if (_source == TrackSource.local) {
       _handler?.publishQueue(orderedQueue, _currentIndex);
@@ -245,6 +267,74 @@ class PlayerModel extends ChangeNotifier {
     } else if (_source == TrackSource.youtube) {
       _handler?.onYouTubeChanged(_ytIndex);
     }
+  }
+
+  // ═══════════════════ EXTRACCIÓN DE COLORES ═══════════════════
+
+  /// Extrae colores de la portada de la canción actual.
+  /// Se llama automáticamente cuando cambia la canción.
+  void _extractColorsForCurrentSong() {
+    final theme = _themeProvider;
+    if (theme == null || !theme.autoColorEnabled) return;
+    final lib = _library;
+    if (lib == null) return;
+
+    final song = current;
+    final ytVideo = currentYouTube;
+    final generation = _colorExtractionGeneration;
+
+    if (song != null) {
+      lib.songArtworkFor(song.id, albumId: song.albumId).then((bytes) {
+        if (bytes == null) return;
+        _applyPaletteFromBytes(bytes, generation);
+      }).catchError((_) {});
+    } else if (ytVideo != null && ytVideo.thumb.isNotEmpty) {
+      _downloadThumbForColor(ytVideo.thumb).then((bytes) {
+        if (bytes.isEmpty) return;
+        _applyPaletteFromBytes(bytes, generation);
+      }).catchError((_) {});
+    }
+  }
+
+  void _applyPaletteFromBytes(Uint8List bytes, int generation) {
+    PaletteGenerator.fromImageProvider(
+      MemoryImage(bytes),
+      maximumColorCount: 8,
+    ).then((palette) {
+      if (generation != _colorExtractionGeneration) return;
+      final theme = _themeProvider;
+      if (theme == null) return;
+      final dominant = palette.dominantColor?.color ?? MelodiaColors.midnight;
+      final vibrant = palette.vibrantColor?.color ??
+          palette.lightVibrantColor?.color ??
+          MelodiaColors.violetLight;
+      theme.setAutoColorFromArtwork(dominant, vibrant);
+    }).catchError((_) {});
+  }
+
+  Future<Uint8List> _downloadThumbForColor(String url) async {
+    HttpClient? client;
+    try {
+      client = HttpClient();
+      client.connectionTimeout = const Duration(seconds: 8);
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close().timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final bytes = await response.fold<List<int>>(
+          <int>[],
+          (prev, chunk) => prev..addAll(chunk),
+        );
+        return Uint8List.fromList(bytes);
+      }
+    } catch (_) {}
+    finally { client?.close(force: true); }
+    return Uint8List(0);
+  }
+
+  /// Dispara la extracción de colores si la canción cambió.
+  void _triggerColorExtraction() {
+    _colorExtractionGeneration++;
+    _extractColorsForCurrentSong();
   }
 
   // ═══════════════════ REPRODUCCIÓN LOCAL ═══════════════════
@@ -275,17 +365,7 @@ class PlayerModel extends ChangeNotifier {
       _position = Duration.zero;
       _player.play();
     } else {
-      // Normal: ConcatenatingAudioSource para gapless
-      _concatSource = ConcatenatingAudioSource(
-        children: songs.map((s) => AudioSource.uri(
-          Uri.file(s.path),
-          tag: s.id,
-        )).toList(),
-      );
-
-      // NO usamos setShuffleModeEnabled: el shuffle se maneja
-      // 100% con _shuffleOrder + nextQueueIndex/prevQueueIndex + seek()
-
+      // Normal: setUrl directo (sin ConcatenatingAudioSource para evitar demora)
       switch (_repeat) {
         case PlayerRepeatMode.off:
           await _player.setLoopMode(LoopMode.off);
@@ -295,10 +375,11 @@ class PlayerModel extends ChangeNotifier {
           await _player.setLoopMode(LoopMode.one);
       }
 
-      await _player.setAudioSource(_concatSource!, initialIndex: startIndex);
+      await _player.setUrl(songs[startIndex].path);
       _position = Duration.zero;
       _player.play();
     }
+    _triggerColorExtraction();
     _isSettingSource = false;
   }
 
@@ -363,13 +444,12 @@ class PlayerModel extends ChangeNotifier {
       _position = Duration.zero;
       _player.play();
     } else {
-      try {
-        await _player.seek(Duration.zero, index: index);
-      } catch (_) {}
+      await _player.setUrl(_queue[index].path);
       _position = Duration.zero;
       _player.play();
     }
     _isSettingSource = false;
+    _triggerColorExtraction();
     notifyListeners();
   }
 
@@ -536,6 +616,7 @@ class PlayerModel extends ChangeNotifier {
           _position = Duration.zero;
           _player.play();
           _syncCurrentToHandler();
+          _triggerColorExtraction();
           _isSettingSource = false;
         } else if (_repeat == PlayerRepeatMode.all && _queue.isNotEmpty) {
           _playHistory?.recordPlay(_queue[_currentIndex].id);
@@ -546,23 +627,30 @@ class PlayerModel extends ChangeNotifier {
           _position = Duration.zero;
           _player.play();
           _syncCurrentToHandler();
+          _triggerColorExtraction();
           _isSettingSource = false;
         }
         notifyListeners();
       } else {
-        // Modo normal (sin crossfade): usar nextQueueIndex + seek() para respetar shuffle
+        // Modo normal (sin crossfade): setUrl directo para cambio instantáneo
         final idx = nextQueueIndex;
         if (idx >= 0 && idx < _queue.length) {
           _playHistory?.recordPlay(_queue[_currentIndex].id);
           _currentIndex = idx;
-          await _player.seek(Duration.zero, index: idx);
+          await _player.setUrl(_queue[idx].path);
+          _position = Duration.zero;
+          _player.play();
           _syncCurrentToHandler();
+          _triggerColorExtraction();
           notifyListeners();
         } else if (_repeat == PlayerRepeatMode.all && _queue.isNotEmpty) {
           _playHistory?.recordPlay(_queue[_currentIndex].id);
           _currentIndex = 0;
-          await _player.seek(Duration.zero, index: 0);
+          await _player.setUrl(_queue[0].path);
+          _position = Duration.zero;
+          _player.play();
           _syncCurrentToHandler();
+          _triggerColorExtraction();
           notifyListeners();
         }
       }
@@ -625,16 +713,20 @@ class PlayerModel extends ChangeNotifier {
           _position = Duration.zero;
           _player.play();
           _syncCurrentToHandler();
+          _triggerColorExtraction();
           _isSettingSource = false;
           notifyListeners();
         }
       } else {
-        // Modo normal (sin crossfade): usar prevQueueIndex + seek() para respetar shuffle
+        // Modo normal (sin crossfade): setUrl directo para cambio instantáneo
         final prevIdx = prevQueueIndex;
         if (prevIdx >= 0 && prevIdx < _queue.length) {
           _currentIndex = prevIdx;
-          await _player.seek(Duration.zero, index: prevIdx);
+          await _player.setUrl(_queue[prevIdx].path);
+          _position = Duration.zero;
+          _player.play();
           _syncCurrentToHandler();
+          _triggerColorExtraction();
           notifyListeners();
         }
       }

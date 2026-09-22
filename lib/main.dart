@@ -85,6 +85,7 @@ Future<void> main() async {
     ),
   );
   playerModel.attachHandler(audioHandler);
+  playerModel.attachTheme(themeProvider);
 
   // Sincronizar crossfade con los valores guardados en ThemeProvider.
   playerModel.setCrossfadeEnabled(themeProvider.crossfadeEnabled, themeProvider.crossfadeDuration);
@@ -92,6 +93,7 @@ Future<void> main() async {
   final libraryModel = LibraryModel();
   libraryModel.init(settingsBox);
   libraryModel.attachPlayHistory(playHistory);
+  playerModel.attachLibrary(libraryModel);
   audioHandler.attachLibrary(libraryModel);
   audioHandler.attachFavorites(favoritesProvider);
   audioHandler.attachPlayHistory(playHistory);

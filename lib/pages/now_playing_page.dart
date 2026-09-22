@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:palette_generator/palette_generator.dart';
 import 'package:provider/provider.dart';
 
 import '../core/theme/melodia_colors.dart';
@@ -41,9 +40,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   String? _lastLyricsKey;
   final Map<int, Future<dynamic>> _artworkFutures = {};
   final ScrollController _lyricsScrollController = ScrollController();
-  int _colorExtractionGeneration = 0;
-  int _lastExtractedGeneration = -1;
-  int? _previousSongId;
 
   @override
   void initState() {
@@ -73,21 +69,13 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     final song = player.current;
     final ytVideo = player.currentYouTube;
 
-    // Detectar cambio de canción e incrementar generation
-    final currentSongId = song?.id ?? ytVideo?.videoId.hashCode;
-    if (currentSongId != null && currentSongId != _previousSongId) {
-      _previousSongId = currentSongId;
-      _colorExtractionGeneration++;
-    }
-
-    // Buscar letras y extraer colores SOLO cuando cambia la canción
-    final gen = _colorExtractionGeneration;
-    if (gen != _lastExtractedGeneration) {
-      _lastExtractedGeneration = gen;
+    // Buscar letras SOLO cuando cambia la canción
+    final lyricsKey = song?.id.toString() ?? ytVideo?.videoId;
+    if (lyricsKey != null && lyricsKey != _lastLyricsKey) {
+      _lastLyricsKey = lyricsKey;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _fetchLyricsIfNeeded(song, ytVideo);
-        _extractColorsForCurrentSong(song, ytVideo, context, gen);
       });
     }
 
@@ -721,36 +709,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     } catch (_) {}
     finally { client?.close(force: true); }
     return Uint8List(0);
-  }
-
-  void _extractColorsFromArtwork(String songId, Uint8List bytes, BuildContext context, int generation) {
-    PaletteGenerator.fromImageProvider(
-      MemoryImage(bytes),
-      maximumColorCount: 8,
-    ).then((palette) {
-      if (!mounted) return;
-      // Verificar que la canción no haya cambiado mientras se extraían los colores
-      if (generation != _colorExtractionGeneration) return;
-      final dominant = palette.dominantColor?.color ?? MelodiaColors.midnight;
-      final vibrant = palette.vibrantColor?.color ?? palette.lightVibrantColor?.color ?? MelodiaColors.violetLight;
-      if (context.mounted) {
-        context.read<ThemeProvider>().setAutoColorFromArtwork(dominant, vibrant);
-      }
-    }).catchError((_) {});
-  }
-
-  void _extractColorsForCurrentSong(LocalSong? song, YouTubeVideo? ytVideo, BuildContext context, int generation) {
-    if (song != null) {
-      context.read<LibraryModel>().songArtworkFor(song.id, albumId: song.albumId).then((bytes) {
-        if (!mounted || bytes == null) return;
-        _extractColorsFromArtwork('local_${song.id}', bytes, context, generation);
-      }).catchError((_) {});
-    } else if (ytVideo != null && ytVideo.thumb.isNotEmpty) {
-      _downloadThumb(ytVideo.thumb).then((bytes) {
-        if (!mounted || bytes.isEmpty) return;
-        _extractColorsFromArtwork(ytVideo.videoId, bytes, context, generation);
-      }).catchError((_) {});
-    }
   }
 
   Widget _topBar(BuildContext context, PlayerModel player, ThemeProvider theme) {
