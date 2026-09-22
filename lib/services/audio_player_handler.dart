@@ -515,6 +515,7 @@ class AudioPlayerHandler extends BaseAudioHandler {
         speed: player.speed,
         repeatMode: _mapRepeatMode(),
         shuffleMode: _mapShuffleMode(),
+        systemActions: const { MediaAction.seek },
       ),
     );
   }
