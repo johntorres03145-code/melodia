@@ -439,6 +439,14 @@ class PlayerModel extends ChangeNotifier {
       return;
     }
 
+    // Actualizar índice ANTES de cambiar source
+    _currentIndex = nextIdx;
+    _syncCurrentToHandler();
+    _triggerColorExtraction();
+
+    // Poner volumen en 0 antes de cargar
+    await _player.setVolume(0.0);
+
     // Cambiar canción en el mismo player
     final loadOk = await _withTimeout(
       _player.setUrl(nextSong.path).then((_) => true),
@@ -451,14 +459,8 @@ class PlayerModel extends ChangeNotifier {
       return;
     }
 
-    // Actualizar índice y UI
-    _currentIndex = nextIdx;
-    _position = Duration.zero;
-    _syncCurrentToHandler();
-    _triggerColorExtraction();
-    notifyListeners();
-
-    // Play
+    // Play (volumen ya está en 0)
+    await _player.setSpeed(_speed);
     final playOk = await _withTimeout(
       _player.play().then((_) => true),
       const Duration(seconds: 3),
@@ -470,8 +472,12 @@ class PlayerModel extends ChangeNotifier {
       return;
     }
 
+    // Actualizar posición
+    _position = Duration.zero;
+    notifyListeners();
+
     // Fase 3: Fade in de la nueva canción
-    final fadeInMs = (_crossfadeSecs * 500).clamp(200, 4000);
+    final fadeInMs = (_crossfadeSecs * 500).clamp(300, 4000);
     const stepMs = 50;
     final totalSteps = fadeInMs ~/ stepMs;
     var step = 0;
@@ -481,6 +487,7 @@ class PlayerModel extends ChangeNotifier {
         step++;
         final t = (step / totalSteps).clamp(0.0, 1.0);
         try { _player.setVolume(t); } catch (_) {}
+        _position = _player.position ?? Duration.zero;
         if (step % 4 == 0) notifyListeners();
         if (step >= totalSteps) {
           timer.cancel();
