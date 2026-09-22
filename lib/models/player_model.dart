@@ -51,9 +51,7 @@ class PlayerModel extends ChangeNotifier {
   Timer? _crossfadeTimer;
   bool _crossfadeTriggeredForSong = false;
 
-  // ── Watchdog: auto-advance si el player se traba ──
-  Timer? _stuckTimer;
-  Duration _lastWatchdogPosition = Duration.zero;
+  // ── Watchdog (deshabilitado — causa loops con crossfade) ──
 
   // ── Protección de transición ──
   bool _isSettingSource = false;
@@ -184,25 +182,23 @@ class PlayerModel extends ChangeNotifier {
     _posSub?.cancel();
     _processSub?.cancel();
     _indexSub?.cancel();
-    _stateSub = _player.playerStateStream.listen((s) {
+    _stateSub = _player.playerStateStream.listen((_) {
       if (_isCrossfading) return;
       notifyListeners();
-      if (_player.playing) {
-        _startWatchdog();
-      } else {
-        _stopWatchdog();
-      }
     });
     _posSub = _player.positionStream.listen((p) {
-      if (_isCrossfading) return;
+      if (_isCrossfading) {
+        // Durante crossfade solo actualizamos posición, NO disparamos crossfade trigger
+        _position = p;
+        return;
+      }
       _position = p;
       _checkCrossfadeTrigger();
-      _lastWatchdogPosition = p;
       notifyListeners();
     });
     _processSub = _player.processingStateStream.listen((p) {
+      if (_isCrossfading || _isSettingSource) return;
       if (p == ProcessingState.completed) {
-        if (_isCrossfading) return; // crossfade maneja la transición
         _onCompleted();
       }
     });
@@ -227,8 +223,9 @@ class PlayerModel extends ChangeNotifier {
   }
 
   void _onCompleted() {
+    if (_isCrossfading || _isSettingSource) return;
     if (_source == TrackSource.local) {
-      if (_crossfadeTriggeredForSong) return; // crossfade ya manejó el cambio
+      if (_crossfadeTriggeredForSong) return;
       if (_currentIndex >= 0 && _currentIndex < _queue.length) {
         _playHistory?.recordPlay(_queue[_currentIndex].id);
       }
@@ -526,32 +523,6 @@ class PlayerModel extends ChangeNotifier {
     } catch (_) {
       Future.microtask(() => next());
     }
-  }
-
-  // ── Watchdog: auto-advance si el player se traba ──
-
-  void _startWatchdog() {
-    _stopWatchdog();
-    _lastWatchdogPosition = _player.position ?? Duration.zero;
-    _stuckTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      if (!_player.playing || _isCrossfading || _isSettingSource) return;
-      final pos = _player.position ?? Duration.zero;
-      final diff = (pos - _lastWatchdogPosition).abs();
-      if (diff < const Duration(seconds: 2)) {
-        // Posición no avanzó en 5 segundos — player trabado
-        debugPrint('[WATCHDOG] Player stuck at $pos → auto-advancing');
-        _stuckTimer?.cancel();
-        _stuckTimer = null;
-        next();
-      } else {
-        _lastWatchdogPosition = pos;
-      }
-    });
-  }
-
-  void _stopWatchdog() {
-    _stuckTimer?.cancel();
-    _stuckTimer = null;
   }
 
   // ═══════════════════ REPRODUCCIÓN LOCAL ═══════════════════
