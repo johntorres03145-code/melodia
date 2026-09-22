@@ -107,7 +107,12 @@ class PlayerModel extends ChangeNotifier {
   PlayerRepeatMode get repeat => _repeat;
   bool get shuffle => _shuffle;
   Duration get position => _position;
-  Duration get duration => _player.duration ?? Duration.zero;
+  Duration get duration {
+    if (_isCrossfading && _crossfadeNextPlayer != null) {
+      return _crossfadeNextPlayer!.duration ?? Duration.zero;
+    }
+    return _player.duration ?? Duration.zero;
+  }
   bool get isCrossfading => _isCrossfading;
   bool get crossfadeEnabled => _crossfadeEnabled;
   bool get isLoadingYouTube => _isLoadingYouTube;
@@ -178,7 +183,9 @@ class PlayerModel extends ChangeNotifier {
     _indexSub?.cancel();
     _stateSub = _player.playerStateStream.listen((_) => notifyListeners());
     _posSub = _player.positionStream.listen((p) {
+      if (_isCrossfading) return; // ignore during crossfade — timer updates _position
       _position = p;
+      _checkCrossfadeTrigger();
       notifyListeners();
     });
     _processSub = _player.processingStateStream.listen((p) {
@@ -207,6 +214,7 @@ class PlayerModel extends ChangeNotifier {
 
   void _onCompleted() {
     if (_source == TrackSource.local) {
+      if (_crossfadeTriggeredForSong) return; // crossfade ya manejó el cambio
       if (_currentIndex >= 0 && _currentIndex < _queue.length) {
         _playHistory?.recordPlay(_queue[_currentIndex].id);
       }
@@ -221,6 +229,7 @@ class PlayerModel extends ChangeNotifier {
 
   void setCrossfadeDuration(int seconds) {
     _crossfadeSecs = seconds.clamp(0, 12);
+    notifyListeners();
   }
 
   /// Cicla entre las velocidades de reproducción disponibles.
@@ -240,6 +249,7 @@ class PlayerModel extends ChangeNotifier {
   void setCrossfadeEnabled(bool enabled, int duration) {
     _crossfadeEnabled = enabled;
     _crossfadeSecs = enabled ? duration.clamp(2, 12) : 0;
+    notifyListeners();
   }
 
   /// Vincula el handler de audio_service (se recorre en main).
@@ -337,6 +347,120 @@ class PlayerModel extends ChangeNotifier {
     _extractColorsForCurrentSong();
   }
 
+  // ═══════════════════ CROSSFADE ═══════════════════
+
+  /// Verifica si es momento de iniciar el crossfade (posición alcanzó el punto de corte).
+  void _checkCrossfadeTrigger() {
+    if (!_crossfadeEnabled || _crossfadeSecs <= 0 || _isCrossfading) return;
+    if (_crossfadeTriggeredForSong) return;
+    if (_repeat == PlayerRepeatMode.one) return;
+    if (_source != TrackSource.local) return;
+
+    final duration = _player.duration;
+    if (duration == null || duration <= Duration.zero) return;
+
+    final remaining = duration - _position;
+    if (remaining <= Duration(seconds: _crossfadeSecs)) {
+      final nextIdx = nextQueueIndex;
+      if (nextIdx >= 0 && nextIdx < _queue.length) {
+        _crossfadeTo(_queue[nextIdx]);
+      }
+    }
+  }
+
+  /// Inicia el crossfade: crea segundo player, rampa de volumen, swap al finalizar.
+  Future<void> _crossfadeTo(LocalSong nextSong) async {
+    if (_isCrossfading || !_crossfadeEnabled || _crossfadeSecs <= 0) return;
+    final nextIdx = nextQueueIndex;
+    if (nextIdx < 0 || nextIdx >= _queue.length) return;
+
+    _isCrossfading = true;
+    _crossfadeTriggeredForSong = true;
+    debugPrint('[CROSSFADE] Starting → "${nextSong.title}" (${_crossfadeSecs}s)');
+
+    try {
+      // 1. Crear segundo player
+      final nextPlayer = AudioPlayer();
+
+      // 2. Copiar equalizer al nuevo player
+      if (_equalizer != null) {
+        try {
+          final newEq = AndroidEqualizer();
+          await _copyEqualizerBands(_equalizer!, newEq);
+          _equalizer = newEq;
+        } catch (_) {}
+      }
+
+      // 3. Cargar siguiente canción, volumen 0, reproducir
+      await nextPlayer.setUrl(nextSong.path);
+      await nextPlayer.setVolume(0.0);
+      await nextPlayer.setSpeed(_speed);
+      nextPlayer.play();
+
+      _crossfadeNextPlayer = nextPlayer;
+
+      // 4. Actualizar currentIndex (UI cambia INMEDIATAMENTE)
+      _currentIndex = nextIdx;
+      _crossfadeTriggeredForSong = true;
+      _syncCurrentToHandler();
+      _triggerColorExtraction();
+      notifyListeners();
+
+      // 5. Rampa de volumen
+      final fadeDurationMs = _crossfadeSecs * 1000;
+      const stepMs = 50;
+      final totalSteps = fadeDurationMs ~/ stepMs;
+      var step = 0;
+
+      _crossfadeTimer = Timer.periodic(const Duration(milliseconds: stepMs), (timer) {
+        step++;
+        final t = (step / totalSteps).clamp(0.0, 1.0);
+
+        // Fade out player viejo
+        try { _player.setVolume(1.0 - t); } catch (_) {}
+        // Fade in player nuevo
+        try { _crossfadeNextPlayer?.setVolume(t); } catch (_) {}
+
+        // Posición viene del player nuevo (UI muestra nueva canción)
+        _position = _crossfadeNextPlayer?.position ?? Duration.zero;
+        notifyListeners();
+
+        if (step >= totalSteps) {
+          timer.cancel();
+          _completeCrossfade(nextSong);
+        }
+      });
+    } catch (e) {
+      debugPrint('[CROSSFADE] Error starting: $e');
+      _cancelCrossfade();
+    }
+  }
+
+  /// Completa el crossfade: dispose player viejo, nuevo es el primario.
+  void _completeCrossfade(LocalSong nextSong) {
+    _crossfadeTimer?.cancel();
+    _crossfadeTimer = null;
+    debugPrint('[CROSSFADE] Completing → "${nextSong.title}"');
+
+    // Dispose player viejo
+    try { _player.dispose(); } catch (_) {}
+
+    // Nuevo player es el primario
+    final nextPlayer = _crossfadeNextPlayer!;
+    _crossfadeNextPlayer = null;
+    _player = nextPlayer;
+
+    _position = _player.position;
+    _setupListeners();
+    _handler?.rebindPlayer(_player);
+    _syncCurrentToHandler();
+    _isCrossfading = false;
+    _isSettingSource = false;
+
+    debugPrint('[CROSSFADE] Done. Playing: "${nextSong.title}" (index=$_currentIndex)');
+    notifyListeners();
+  }
+
   // ═══════════════════ REPRODUCCIÓN LOCAL ═══════════════════
 
   Future<void> playQueue(List<LocalSong> songs, int startIndex) async {
@@ -385,6 +509,7 @@ class PlayerModel extends ChangeNotifier {
 
   /// Agrega una canción al final de la cola actual.
   void addToQueue(LocalSong song) {
+    if (_isCrossfading) _cancelCrossfade();
     _queue.add(song);
     _concatSource?.add(AudioSource.uri(Uri.file(song.path), tag: song.id));
     _syncToHandler();
@@ -393,6 +518,7 @@ class PlayerModel extends ChangeNotifier {
 
   /// Inserta una canción justo después de la actual en la cola.
   void playNext(LocalSong song) {
+    if (_isCrossfading) _cancelCrossfade();
     final insertAt = _currentIndex + 1;
     _queue.insert(insertAt, song);
     if (_concatSource != null) {
@@ -406,6 +532,7 @@ class PlayerModel extends ChangeNotifier {
   void removeFromQueue(int index) {
     if (index < 0 || index >= _queue.length) return;
     if (index == _currentIndex) return;
+    if (_isCrossfading) _cancelCrossfade();
     _queue.removeAt(index);
     _concatSource?.removeAt(index);
     if (index < _currentIndex) _currentIndex--;
@@ -417,6 +544,7 @@ class PlayerModel extends ChangeNotifier {
   void reorderQueue(int oldIndex, int newIndex) {
     if (oldIndex < 0 || oldIndex >= _queue.length) return;
     if (newIndex < 0 || newIndex >= _queue.length) return;
+    if (_isCrossfading) _cancelCrossfade();
     final song = _queue.removeAt(oldIndex);
     _queue.insert(newIndex, song);
     _concatSource?.move(oldIndex, newIndex);
@@ -877,40 +1005,6 @@ class PlayerModel extends ChangeNotifier {
       newParams.bands[i].setGain(oldParams.bands[i].gain);
     }
     dst.setEnabled(true);
-  }
-
-  /// Crossfade DESHABILITADO temporalmente — se re implementará desde cero.
-  Future<void> _crossfadeTo(LocalSong nextSong) async {
-    debugPrint('[CROSSFADE] DISABLED — skipping "${nextSong.title}"');
-    return;
-  }
-
-  /// Intercambia el player viejo por el nuevo después del ramp de crossfade.
-  void _swapCrossfadePlayer(AudioPlayer nextPlayer, AndroidEqualizer? newEqualizer, LocalSong nextSong) {
-    debugPrint('[CROSSFADE] Swapping players → "${nextSong.title}"');
-    _crossfadeNextPlayer = null;
-
-    // Dispose fire-and-forget del player viejo
-    try { _player.setVolume(1.0); } catch (_) {}
-    _player.dispose();
-
-    _player = nextPlayer;
-    if (newEqualizer != null) {
-      _equalizer = newEqualizer;
-    }
-
-    // Actualizar _currentIndex de forma atómica con el swap del player
-    final newIdx = _queue.indexWhere((s) => s.id == nextSong.id);
-    if (newIdx >= 0) _currentIndex = newIdx;
-
-    _position = nextPlayer.position;
-    _setupListeners();
-    _handler?.rebindPlayer(nextPlayer);
-    _syncCurrentToHandler();
-    _isCrossfading = false;
-    _isSettingSource = false;
-    debugPrint('[CROSSFADE] Swap complete. Playing: "${nextSong.title}" (index=$_currentIndex)');
-    notifyListeners();
   }
 
   void _cancelCrossfade() {
