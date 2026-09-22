@@ -273,7 +273,7 @@ class PlayerModel extends ChangeNotifier {
       // Crossfade: cargar solo la canción actual (control manual del timing)
       await _player.setUrl(songs[startIndex].path);
       _position = Duration.zero;
-      await _player.play();
+      _player.play();
     } else {
       // Normal: ConcatenatingAudioSource para gapless
       _concatSource = ConcatenatingAudioSource(
@@ -297,7 +297,7 @@ class PlayerModel extends ChangeNotifier {
 
       await _player.setAudioSource(_concatSource!, initialIndex: startIndex);
       _position = Duration.zero;
-      await _player.play();
+      _player.play();
     }
     _isSettingSource = false;
   }
@@ -361,13 +361,13 @@ class PlayerModel extends ChangeNotifier {
     if (_crossfadeEnabled) {
       await _player.setUrl(_queue[index].path);
       _position = Duration.zero;
-      await _player.play();
+      _player.play();
     } else {
       try {
         await _player.seek(Duration.zero, index: index);
       } catch (_) {}
       _position = Duration.zero;
-      await _player.play();
+      _player.play();
     }
     _isSettingSource = false;
     notifyListeners();
@@ -386,7 +386,7 @@ class PlayerModel extends ChangeNotifier {
     if (_ytAudioSources[index] != null) {
       await _loadYouTubeCurrent();
       _position = Duration.zero;
-      await _player.play();
+      _player.play();
     }
 
     _isLoadingYouTube = false;
@@ -451,7 +451,7 @@ class PlayerModel extends ChangeNotifier {
     await _resolveYtSource(startIndex);
     await _loadYouTubeCurrent();
     _position = Duration.zero;
-    await _player.play();
+    _player.play();
 
     _isLoadingYouTube = false;
     notifyListeners();
@@ -487,7 +487,7 @@ class PlayerModel extends ChangeNotifier {
       debugPrint('Repetición total, reiniciando cola');
       Future.microtask(() {
         _ytIndex = 0;
-        _loadYouTubeCurrent().then((_) async => await _player.play());
+        _loadYouTubeCurrent().then((_) => _player.play());
       });
     } else {
       debugPrint('No hay más canciones, manteniendo servicio activo');
@@ -511,7 +511,7 @@ class PlayerModel extends ChangeNotifier {
           _currentIndex = 0;
         }
       }
-      await _player.play();
+      _player.play();
     }
   }
 
@@ -534,7 +534,7 @@ class PlayerModel extends ChangeNotifier {
           _crossfadeTriggeredForSong = false;
           await _player.setUrl(_queue[idx].path);
           _position = Duration.zero;
-          await _player.play();
+          _player.play();
           _syncCurrentToHandler();
           _isSettingSource = false;
         } else if (_repeat == PlayerRepeatMode.all && _queue.isNotEmpty) {
@@ -544,7 +544,7 @@ class PlayerModel extends ChangeNotifier {
           _crossfadeTriggeredForSong = false;
           await _player.setUrl(_queue[0].path);
           _position = Duration.zero;
-          await _player.play();
+          _player.play();
           _syncCurrentToHandler();
           _isSettingSource = false;
         }
@@ -574,7 +574,7 @@ class PlayerModel extends ChangeNotifier {
           await _resolveYtSource(0);
           await _loadYouTubeCurrent();
           _position = Duration.zero;
-          await _player.play();
+          _player.play();
         } else {
           await _player.seek(Duration.zero);
           _position = Duration.zero;
@@ -593,7 +593,7 @@ class PlayerModel extends ChangeNotifier {
       if (_ytAudioSources[idx] != null) {
         await _loadYouTubeCurrent();
         _position = Duration.zero;
-        await _player.play();
+        _player.play();
       }
 
       _isLoadingYouTube = false;
@@ -623,7 +623,7 @@ class PlayerModel extends ChangeNotifier {
           _crossfadeTriggeredForSong = false;
           await _player.setUrl(_queue[prevIdx].path);
           _position = Duration.zero;
-          await _player.play();
+          _player.play();
           _syncCurrentToHandler();
           _isSettingSource = false;
           notifyListeners();
@@ -652,7 +652,7 @@ class PlayerModel extends ChangeNotifier {
       if (_ytAudioSources[idx] != null) {
         await _loadYouTubeCurrent();
         _position = Duration.zero;
-        await _player.play();
+        _player.play();
       }
 
       _isLoadingYouTube = false;
