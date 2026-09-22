@@ -50,6 +50,7 @@ class PlayerModel extends ChangeNotifier {
   bool _isCrossfading = false;
   Timer? _crossfadeTimer;
   bool _crossfadeTriggeredForSong = false;
+  int _crossfadePrevIndex = -1; // Índice antes del crossfade (para rollback)
 
   // ── Watchdog (deshabilitado — causa loops con crossfade) ──
 
@@ -397,6 +398,7 @@ class PlayerModel extends ChangeNotifier {
 
     _isCrossfading = true;
     _crossfadeTriggeredForSong = true;
+    _crossfadePrevIndex = _currentIndex;
     debugPrint('[CROSSFADE] Starting → "${nextSong.title}" (${_crossfadeSecs}s)');
 
     try {
@@ -411,7 +413,8 @@ class PlayerModel extends ChangeNotifier {
           step++;
           final t = (step / totalSteps).clamp(0.0, 1.0);
           try { _player.setVolume(1.0 - t); } catch (_) {}
-          if (step % 4 == 0) notifyListeners();
+          _position = _player.position ?? Duration.zero;
+          if (step % 2 == 0) notifyListeners();
           if (step >= totalSteps) {
             timer.cancel();
             _crossfadeTransition(nextSong);
@@ -488,7 +491,7 @@ class PlayerModel extends ChangeNotifier {
         final t = (step / totalSteps).clamp(0.0, 1.0);
         try { _player.setVolume(t); } catch (_) {}
         _position = _player.position ?? Duration.zero;
-        if (step % 4 == 0) notifyListeners();
+        if (step % 2 == 0) notifyListeners();
         if (step >= totalSteps) {
           timer.cancel();
           _completeCrossfade();
@@ -506,6 +509,8 @@ class PlayerModel extends ChangeNotifier {
     _crossfadeTimer = null;
     _isCrossfading = false;
     _crossfadeTriggeredForSong = false;
+    _crossfadePrevIndex = -1;
+    _syncToHandler();
     try { _player.setVolume(1.0); } catch (_) {}
     debugPrint('[CROSSFADE] Done.');
     notifyListeners();
@@ -516,11 +521,18 @@ class PlayerModel extends ChangeNotifier {
     _crossfadeTimer = null;
     _isCrossfading = false;
     _crossfadeTriggeredForSong = false;
+    // Restaurar índice si el crossfade falló después de cambiar _currentIndex
+    if (_crossfadePrevIndex >= 0 && _crossfadePrevIndex < _queue.length) {
+      _currentIndex = _crossfadePrevIndex;
+      _syncCurrentToHandler();
+    }
+    _crossfadePrevIndex = -1;
     try { _player.setVolume(1.0); } catch (_) {}
   }
 
   /// Si el player terminó y el crossfade falló, avanzar.
   void _advanceIfOldPlayerDone() {
+    if (_isCrossfading || _isSettingSource) return;
     try {
       final state = _player.processingState;
       if (state == ProcessingState.completed) {

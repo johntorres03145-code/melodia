@@ -150,9 +150,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
   /// Busca la letra si la canción cambió.
   void _fetchLyricsIfNeeded(LocalSong? song, YouTubeVideo? ytVideo) {
-    final key = song != null ? '${song.artist}|||${song.title}'
-        : ytVideo != null ? '${ytVideo.channel}|||${ytVideo.title}'
-        : null;
+    final key = song?.id.toString() ?? ytVideo?.videoId;
     if (key == null || key == _lastLyricsKey) return;
     _lastLyricsKey = key;
     final artist = song?.artist ?? ytVideo?.channel ?? '';
