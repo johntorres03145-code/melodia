@@ -72,7 +72,6 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     // Buscar letras SOLO cuando cambia la canción
     final lyricsKey = song?.id.toString() ?? ytVideo?.videoId;
     if (lyricsKey != null && lyricsKey != _lastLyricsKey) {
-      _lastLyricsKey = lyricsKey;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _fetchLyricsIfNeeded(song, ytVideo);
