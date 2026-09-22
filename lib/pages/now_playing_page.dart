@@ -42,6 +42,7 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   final Map<int, Future<dynamic>> _artworkFutures = {};
   final ScrollController _lyricsScrollController = ScrollController();
   int _colorExtractionGeneration = 0;
+  int _lastExtractedGeneration = -1;
   int? _previousSongId;
 
   @override
@@ -79,12 +80,16 @@ class _NowPlayingPageState extends State<NowPlayingPage>
       _colorExtractionGeneration++;
     }
 
-    // Buscar letras y extraer colores cuando cambia la canción (fuera del build)
+    // Buscar letras y extraer colores SOLO cuando cambia la canción
     final gen = _colorExtractionGeneration;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchLyricsIfNeeded(song, ytVideo);
-      _extractColorsForCurrentSong(song, ytVideo, context, gen);
-    });
+    if (gen != _lastExtractedGeneration) {
+      _lastExtractedGeneration = gen;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _fetchLyricsIfNeeded(song, ytVideo);
+        _extractColorsForCurrentSong(song, ytVideo, context, gen);
+      });
+    }
 
     if (player.playing) {
       if (!_waveCtrl.isAnimating) _waveCtrl.repeat();
