@@ -377,7 +377,7 @@ class PlayerModel extends ChangeNotifier {
 
   // ═══════════════════ CROSSFADE (DUAL PLAYER) ═══════════════════
 
-  /// Verifica si es momento de iniciar el crossfade — DESHABILITADO temporalmente para estabilidad.
+  /// Verifica si es momento de iniciar el crossfade — DESHABILITADO temporalmente.
   void _checkCrossfadeTrigger() {
     return;
     if (!_crossfadeEnabled || _crossfadeSecs <= 0 || _isCrossfading) return;
@@ -782,8 +782,7 @@ class PlayerModel extends ChangeNotifier {
   void skipToIndex(int index) async {
     if (index < 0 || index >= _queue.length) return;
     if (_isCrossfading) _cancelCrossfade();
-    // Crossfade deshabilitado — salto instantáneo
-    // if (_crossfadeEnabled && index != _currentIndex) { _crossfadeTo(...); return; }
+    // Crossfade deshabilitado
     _isSettingSource = true;
     _currentIndex = index;
     _crossfadeTriggeredForSong = false;
@@ -1016,7 +1015,6 @@ class PlayerModel extends ChangeNotifier {
 
     if (_source == TrackSource.local) {
       if (_crossfadeEnabled) {
-        // Crossfade deshabilitado — next instantáneo
         final idx = nextQueueIndex;
         if (idx >= 0 && idx < _queue.length) {
           _playHistory?.recordPlay(_queue[_currentIndex].id);
