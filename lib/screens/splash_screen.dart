@@ -19,7 +19,7 @@ class SplashScreen extends StatefulWidget {
     final lastOpen = settings.get('lastOpenTime') as int? ?? 0;
     final now = DateTime.now().millisecondsSinceEpoch;
     final hoursSince = (now - lastOpen) / (1000 * 60 * 60);
-    return hoursSince >= 2;
+    return hoursSince >= 4;
   }
 
   /// Guarda el timestamp de apertura actual.
@@ -41,7 +41,7 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 4500),
+      duration: const Duration(milliseconds: 1200),
     );
 
     // Fade del fondo: de negro a transparente al inicio, luego permanece
@@ -82,19 +82,22 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: MelodiaColors.midnight,
-      body: AnimatedBuilder(
-        animation: _ctrl,
-        builder: (context, _) {
-          return CustomPaint(
-            size: Size(
-              MediaQuery.of(context).size.width,
-              MediaQuery.of(context).size.height,
-            ),
-            painter: SplashScreenPainter(progress: _ctrl.value),
-          );
-        },
+    return GestureDetector(
+      onTap: _navigateToHome,
+      child: Scaffold(
+        backgroundColor: MelodiaColors.midnight,
+        body: AnimatedBuilder(
+          animation: _ctrl,
+          builder: (context, _) {
+            return CustomPaint(
+              size: Size(
+                MediaQuery.of(context).size.width,
+                MediaQuery.of(context).size.height,
+              ),
+              painter: SplashScreenPainter(progress: _ctrl.value),
+            );
+          },
+        ),
       ),
     );
   }

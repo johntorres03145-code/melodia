@@ -43,21 +43,25 @@ Future<void> main() async {
   MobileAds.instance.initialize().ignore();
 
   await Hive.initFlutter();
-  final settingsBox = await Hive.openBox('settings');
-  final playlistsBox = await Hive.openBox('playlists');
-  final historyBox = await Hive.openBox('play_history');
+  final boxes = await Future.wait([
+    Hive.openBox('settings'),
+    Hive.openBox('playlists'),
+    Hive.openBox('play_history'),
+  ]);
+  final settingsBox = boxes[0];
+  final playlistsBox = boxes[1];
+  final historyBox = boxes[2];
 
   final themeProvider = ThemeProvider();
-  await themeProvider.init(settingsBox);
-
   final favoritesProvider = FavoritesModel();
-  await favoritesProvider.init(settingsBox);
-
   final playlistModel = PlaylistModel();
-  await playlistModel.init(playlistsBox);
-
   final playHistory = PlayHistoryModel();
-  await playHistory.init(historyBox);
+  await Future.wait([
+    themeProvider.init(settingsBox),
+    favoritesProvider.init(settingsBox),
+    playlistModel.init(playlistsBox),
+    playHistory.init(historyBox),
+  ]);
 
   // Reproducción en segundo plano (audio_service) compartiendo el player.
   final equalizer = AndroidEqualizer();

@@ -337,7 +337,7 @@ class PlayerModel extends ChangeNotifier {
 
   void _applyPaletteFromBytes(Uint8List bytes, int generation) {
     PaletteGenerator.fromImageProvider(
-      MemoryImage(bytes),
+      ResizeImage(MemoryImage(bytes), width: 80, height: 80),
       maximumColorCount: 8,
     ).then((palette) {
       if (generation != _colorExtractionGeneration) return;
@@ -703,13 +703,12 @@ class PlayerModel extends ChangeNotifier {
 
     _syncToHandler();
 
-    if (_crossfadeEnabled) {
-      // Crossfade: cargar solo la canción actual (control manual del timing)
-      await _player.setUrl(songs[startIndex].path);
-      _position = Duration.zero;
-      _player.play();
-    } else {
-      // Normal: setUrl directo (sin ConcatenatingAudioSource para evitar demora)
+    // Gapless sin pausas: usar ConcatenatingAudioSource para preload
+    try {
+      _concatSource = ConcatenatingAudioSource(
+        useLazyPreparation: false,
+        children: songs.map((s) => AudioSource.uri(Uri.file(s.path), tag: s.id)).toList(),
+      );
       switch (_repeat) {
         case PlayerRepeatMode.off:
           await _player.setLoopMode(LoopMode.off);
@@ -718,13 +717,18 @@ class PlayerModel extends ChangeNotifier {
         case PlayerRepeatMode.one:
           await _player.setLoopMode(LoopMode.one);
       }
-
+      await _player.setAudioSource(_concatSource!, initialIndex: startIndex, initialPosition: Duration.zero);
+      _position = Duration.zero;
+      _player.play();
+    } catch (_) {
+      // Fallback si concat falla
       await _player.setUrl(songs[startIndex].path);
       _position = Duration.zero;
       _player.play();
     }
-    _triggerColorExtraction();
     _isSettingSource = false;
+    _triggerColorExtraction();
+    notifyListeners();
   }
 
   /// Agrega una canción al final de la cola actual.
@@ -783,8 +787,10 @@ class PlayerModel extends ChangeNotifier {
   void skipToIndex(int index) async {
     if (index < 0 || index >= _queue.length) return;
     if (_isCrossfading) _cancelCrossfade();
-    // Crossfade deshabilitado temporalmente — salto instantáneo
-    // if (_crossfadeEnabled && index != _currentIndex) { _crossfadeTo(...); return; }
+    if (_concatSource != null && _shuffleMode == ShuffleMode.off) {
+      await _player.seek(Duration.zero, index: index);
+      return;
+    }
     _isSettingSource = true;
     _currentIndex = index;
     _crossfadeTriggeredForSong = false;
@@ -918,38 +924,11 @@ class PlayerModel extends ChangeNotifier {
     if (_ytSkipInProgress) return;
     _ytSkipInProgress = true;
     _ytConsecutiveFails++;
-    if (_ytConsecutiveFails >= 3) {
-      debugPrint('YouTube: 3 fallos consecutivos, deteniendo auto-skip');
-      _ytConsecutiveFails = 0;
-      _isLoadingYouTube = false;
-      _ytSkipInProgress = false;
-      notifyListeners();
-      return;
-    }
-    final gen = _ytQueueGen;
-    final idx = _nextYtIndex();
-    if (idx >= 0) {
-      debugPrint('Saltando canción fallida → siguiente ($idx) intento $_ytConsecutiveFails');
-      Future.delayed(const Duration(milliseconds: 1000), () {
-        if (gen != _ytQueueGen) { _ytSkipInProgress = false; return; }
-        _ytSkipInProgress = false;
-        next();
-      });
-    } else if (_repeat == PlayerRepeatMode.all) {
-      debugPrint('Repetición total, reiniciando cola');
-      Future.delayed(const Duration(milliseconds: 1000), () {
-        if (gen != _ytQueueGen) { _ytSkipInProgress = false; return; }
-        _ytSkipInProgress = false;
-        _ytIndex = 0;
-        _loadYouTubeCurrent().then((_) => _player.play());
-      });
-    } else {
-      debugPrint('No hay más canciones, manteniendo servicio activo');
-      _position = Duration.zero;
-      _ytSkipInProgress = false;
-      _isLoadingYouTube = false;
-      notifyListeners();
-    }
+    debugPrint('YouTube: fallo $_ytConsecutiveFails, NO auto-skip (requiere manual)');
+    // No auto-skip: solo limpiar estado y esperar a que usuario dé siguiente manualmente
+    _isLoadingYouTube = false;
+    _ytSkipInProgress = false;
+    notifyListeners();
   }
 
   void _resetYtFailCount() {
@@ -1027,50 +1006,34 @@ class PlayerModel extends ChangeNotifier {
     }
 
     if (_source == TrackSource.local) {
-      if (_crossfadeEnabled) {
-        // Crossfade manual deshabilitado temporalmente — next instantáneo para estabilidad (799de25)
-        final idx = nextQueueIndex;
-        if (idx >= 0 && idx < _queue.length) {
-          _playHistory?.recordPlay(_queue[_currentIndex].id);
+      final idx = nextQueueIndex;
+      if (idx >= 0 && idx < _queue.length) {
+        _playHistory?.recordPlay(_queue[_currentIndex].id);
+        // Gapless si hay concat y no hay shuffle
+        if (_concatSource != null && _shuffleMode == ShuffleMode.off) {
+          await _player.seek(Duration.zero, index: idx);
+        } else {
           _currentIndex = idx;
           await _player.setUrl(_queue[idx].path);
           _position = Duration.zero;
           _player.play();
           _syncCurrentToHandler();
           _triggerColorExtraction();
-          notifyListeners();
-        } else if (_repeat == PlayerRepeatMode.all && _queue.isNotEmpty) {
-          _playHistory?.recordPlay(_queue[_currentIndex].id);
+        }
+        notifyListeners();
+      } else if (_repeat == PlayerRepeatMode.all && _queue.isNotEmpty) {
+        _playHistory?.recordPlay(_queue[_currentIndex].id);
+        if (_concatSource != null && _shuffleMode == ShuffleMode.off) {
+          await _player.seek(Duration.zero, index: 0);
+        } else {
           _currentIndex = 0;
           await _player.setUrl(_queue[0].path);
           _position = Duration.zero;
           _player.play();
           _syncCurrentToHandler();
           _triggerColorExtraction();
-          notifyListeners();
         }
-      } else {
-        // Modo normal (sin crossfade): setUrl directo para cambio instantáneo
-        final idx = nextQueueIndex;
-        if (idx >= 0 && idx < _queue.length) {
-          _playHistory?.recordPlay(_queue[_currentIndex].id);
-          _currentIndex = idx;
-          await _player.setUrl(_queue[idx].path);
-          _position = Duration.zero;
-          _player.play();
-          _syncCurrentToHandler();
-          _triggerColorExtraction();
-          notifyListeners();
-        } else if (_repeat == PlayerRepeatMode.all && _queue.isNotEmpty) {
-          _playHistory?.recordPlay(_queue[_currentIndex].id);
-          _currentIndex = 0;
-          await _player.setUrl(_queue[0].path);
-          _position = Duration.zero;
-          _player.play();
-          _syncCurrentToHandler();
-          _triggerColorExtraction();
-          notifyListeners();
-        }
+        notifyListeners();
       }
     } else {
       final idx = _nextYtIndex();
@@ -1127,29 +1090,19 @@ class PlayerModel extends ChangeNotifier {
     }
 
     if (_source == TrackSource.local) {
-      if (_crossfadeEnabled) {
-        final prevIdx = prevQueueIndex;
-        if (prevIdx >= 0 && prevIdx < _queue.length) {
+      final prevIdx = prevQueueIndex;
+      if (prevIdx >= 0 && prevIdx < _queue.length) {
+        if (_concatSource != null && _shuffleMode == ShuffleMode.off) {
+          await _player.seek(Duration.zero, index: prevIdx);
+        } else {
           _currentIndex = prevIdx;
           await _player.setUrl(_queue[prevIdx].path);
           _position = Duration.zero;
           _player.play();
           _syncCurrentToHandler();
           _triggerColorExtraction();
-          notifyListeners();
         }
-      } else {
-        // Modo normal (sin crossfade): setUrl directo para cambio instantáneo
-        final prevIdx = prevQueueIndex;
-        if (prevIdx >= 0 && prevIdx < _queue.length) {
-          _currentIndex = prevIdx;
-          await _player.setUrl(_queue[prevIdx].path);
-          _position = Duration.zero;
-          _player.play();
-          _syncCurrentToHandler();
-          _triggerColorExtraction();
-          notifyListeners();
-        }
+        notifyListeners();
       }
     } else {
       final idx = _prevYtIndex();

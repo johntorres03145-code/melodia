@@ -40,6 +40,11 @@ class LibraryModel extends ChangeNotifier {
   bool _loading = false;
   String? _error;
   Box? _settingsBox;
+  List<LocalSong>? _cachedSongs;
+  String? _cachedQuery;
+  SortMode? _cachedSort;
+  List<ArtistData>? _cachedArtists;
+  List<AlbumData>? _cachedAlbums;
 
   bool get loading => _loading;
   String? get error => _error;
@@ -54,12 +59,14 @@ class LibraryModel extends ChangeNotifier {
   void hideSong(int id) {
     _hiddenIds.add(id);
     _saveHidden();
+    _invalidateCache();
     _notify();
   }
 
   void unhideSong(int id) {
     _hiddenIds.remove(id);
     _saveHidden();
+    _invalidateCache();
     _notify();
   }
 
@@ -70,6 +77,7 @@ class LibraryModel extends ChangeNotifier {
 
   /// Artistas únicos con conteo de canciones y referencia para artwork.
   List<ArtistData> get artists {
+    if (_cachedArtists != null) return _cachedArtists!;
     final map = <String, ArtistData>{};
     for (final s in songs) {
       final name = s.artist.isEmpty ? 'Artista desconocido' : s.artist;
@@ -81,11 +89,13 @@ class LibraryModel extends ChangeNotifier {
       }
     }
     final list = map.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+    _cachedArtists = list;
     return list;
   }
 
   /// Álbumes únicos con conteo de canciones y albumId para artwork.
   List<AlbumData> get albums {
+    if (_cachedAlbums != null) return _cachedAlbums!;
     final map = <String, AlbumData>{};
     for (final s in songs) {
       final name = s.album.isEmpty ? 'Álbum desconocido' : s.album;
@@ -97,6 +107,7 @@ class LibraryModel extends ChangeNotifier {
       }
     }
     final list = map.values.toList()..sort((a, b) => a.name.compareTo(b.name));
+    _cachedAlbums = list;
     return list;
   }
 
@@ -110,6 +121,9 @@ class LibraryModel extends ChangeNotifier {
 
   /// Canciones filtradas por el buscador y ocultas.
   List<LocalSong> get songs {
+    if (_cachedSongs != null && _cachedQuery == _query && _cachedSort == _sortMode) {
+      return _cachedSongs!;
+    }
     final q = _query.toLowerCase().trim();
     final list = q.isEmpty ? List<LocalSong>.from(_songs) : _songs.where((s) {
       return s.title.toLowerCase().contains(q) ||
@@ -118,6 +132,9 @@ class LibraryModel extends ChangeNotifier {
     }).toList();
     list.removeWhere((s) => _hiddenIds.contains(s.id));
     _applySorting(list);
+    _cachedSongs = list;
+    _cachedQuery = _query;
+    _cachedSort = _sortMode;
     return list;
   }
 
@@ -131,6 +148,7 @@ class LibraryModel extends ChangeNotifier {
 
   void setSortMode(SortMode mode) {
     _sortMode = mode;
+    _invalidateCache();
     _notify();
   }
 
@@ -154,6 +172,12 @@ class LibraryModel extends ChangeNotifier {
     }
   }
 
+  void _invalidateCache() {
+    _cachedSongs = null;
+    _cachedArtists = null;
+    _cachedAlbums = null;
+  }
+
   /// Carga la biblioteca desde el dispositivo.
   /// Reintenta hasta 2 veces si falla (problemas comunes en Xiaomi/MIUI).
   Future<void> load() async {
@@ -172,6 +196,7 @@ class LibraryModel extends ChangeNotifier {
           break;
         }
         _songs = await _service.fetchSongs();
+        _invalidateCache();
         if (_songs.isNotEmpty) break;
         // Si no devolvió canciones, esperar un poco y reintentar (Xiaomi lento)
         if (attempt == 0) await Future.delayed(const Duration(seconds: 1));
@@ -189,6 +214,7 @@ class LibraryModel extends ChangeNotifier {
 
   void setQuery(String q) {
     _query = q;
+    _invalidateCache();
     _notify();
   }
 

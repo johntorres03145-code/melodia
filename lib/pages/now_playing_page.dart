@@ -127,18 +127,18 @@ class _NowPlayingPageState extends State<NowPlayingPage>
             child: FittedBox(
               fit: BoxFit.cover,
               child: SizedBox(
-                width: 800,
-                height: 800,
-                child: _artworkContent(context, song, ytVideo, 800),
+                width: 400,
+                height: 400,
+                child: _artworkContent(context, song, ytVideo, 300),
               ),
             ),
           ),
         ),
-        // Capa de blur
+        // Capa de blur optimizada (sigma 40→16 para performance)
         Positioned.fill(
           child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 40, sigmaY: 40),
-            child: Container(color: Colors.black.withValues(alpha: 0.1)),
+            filter: ui.ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+            child: Container(color: Colors.black.withValues(alpha: 0.15)),
           ),
         ),
         // Contenido encima
@@ -483,36 +483,40 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
     return LayoutBuilder(builder: (ctx, constraints) {
       final h = constraints.maxHeight;
-      final widthLeft = constraints.maxWidth * 5 / 12;
-      final maxByWidth = (widthLeft - 24) / 1.65;
-      final maxByHeight = (h - 62) / 1.1;
-      final desired = h < 400 ? 190.0 : 220.0;
+      final widthLeft = constraints.maxWidth * 6 / 12;
+      final maxByWidth = (widthLeft - 16) / 1.30;
+      final maxByHeight = (h - 40) / 1.0;
+      final desired = h < 400 ? 240.0 : 280.0;
       final discSize = desired.clamp(0, math.min(maxByWidth, maxByHeight)).toDouble();
 
       return Row(
         children: [
-          // Izquierda: título arriba + disco/portada compacto
+          // Izquierda: disco centrado en esquina, bien grande
           Expanded(
-            flex: 5,
-            child: Center(
-              child: isYtLoading
-                  ? _skeletonArtwork(theme)
-                  : Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: _titleAndArtistCompact(context, song, ytVideo, theme),
-                        ),
-                        const SizedBox(height: 12),
-                        _vinylWithSleeve(context, song, ytVideo, theme, discSizeOverride: discSize),
-                      ],
-                    ),
+            flex: 6,
+            child: Align(
+              alignment: Alignment.center,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 12, bottom: 8),
+                child: isYtLoading
+                    ? _skeletonArtwork(theme)
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            child: _titleAndArtistCompact(context, song, ytVideo, theme),
+                          ),
+                          const SizedBox(height: 16),
+                          _vinylWithSleeve(context, song, ytVideo, theme, discSizeOverride: discSize),
+                        ],
+                      ),
+              ),
             ),
           ),
-          // Derecha: letra con fondo oscuro + progress + controles
+          // Derecha: letra con fondo oscuro + progress + controles (más compacto)
           Expanded(
-            flex: 7,
+            flex: 6,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
               child: Column(
@@ -638,15 +642,16 @@ class _NowPlayingPageState extends State<NowPlayingPage>
   Widget _vinylWithSleeve(
       BuildContext context, LocalSong? song, YouTubeVideo? ytVideo, ThemeProvider theme,
       {double? discSizeOverride}) {
-    final discSize = discSizeOverride ?? 200.0;
-    final sleeveSize = discSize * 1.1;
-    final slideOut = discSize * 0.55; // cuánto sale el disco al reproducir
+    final discSize = discSizeOverride ?? 240.0;
+    final sleeveSize = discSize * 1.05;
+    final slideOut = discSize * 0.68; // más expuesto
 
     return SizedBox(
-      width: sleeveSize + slideOut + 10,
-      height: sleeveSize,
+      width: sleeveSize + slideOut + 16,
+      height: sleeveSize + 12,
       child: Stack(
-        alignment: Alignment.centerLeft,
+        clipBehavior: Clip.none,
+        alignment: Alignment.center,
         children: [
           // Disco (atrás) — se desliza a la derecha al reproducir
           AnimatedBuilder(
