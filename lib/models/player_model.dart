@@ -84,6 +84,7 @@ class PlayerModel extends ChangeNotifier {
   int _ytIndex = -1;
   List<AudioSource?> _ytAudioSources = [];
   bool _isLoadingYouTube = false;
+  int _ytQueueGen = 0;
   TrackSource _source = TrackSource.local;
 
   PlayerRepeatMode _repeat = PlayerRepeatMode.off;
@@ -377,8 +378,9 @@ class PlayerModel extends ChangeNotifier {
 
   // ═══════════════════ CROSSFADE (DUAL PLAYER) ═══════════════════
 
-  /// Verifica si es momento de iniciar el crossfade.
+  /// Verifica si es momento de iniciar el crossfade — DESHABILITADO temporalmente para estabilidad (vuelve a 799de25).
   void _checkCrossfadeTrigger() {
+    return; // Crossfade auto deshabilitado para evitar pausa/barra trabada — usar next instantáneo
     if (!_crossfadeEnabled || _crossfadeSecs <= 0 || _isCrossfading) return;
     if (_crossfadeTriggeredForSong) return;
     if (_repeat == PlayerRepeatMode.one) return;
@@ -781,10 +783,8 @@ class PlayerModel extends ChangeNotifier {
   void skipToIndex(int index) async {
     if (index < 0 || index >= _queue.length) return;
     if (_isCrossfading) _cancelCrossfade();
-    if (_crossfadeEnabled && index != _currentIndex) {
-      _crossfadeTo(_queue[index], effectiveSecs: 1);
-      return;
-    }
+    // Crossfade deshabilitado temporalmente — salto instantáneo
+    // if (_crossfadeEnabled && index != _currentIndex) { _crossfadeTo(...); return; }
     _isSettingSource = true;
     _currentIndex = index;
     _crossfadeTriggeredForSong = false;
@@ -800,15 +800,22 @@ class PlayerModel extends ChangeNotifier {
   /// Salta a una canción específica de la cola de YouTube.
   Future<void> skipToYtIndex(int index) async {
     if (index < 0 || index >= _ytQueue.length) return;
+    _ytQueueGen++;
     _isLoadingYouTube = true;
     notifyListeners();
 
     _ytIndex = index;
     await _resolveYtSource(index);
 
-    _syncCurrentToHandler();
+    if (_ytAudioSources[index] == null) {
+      _isLoadingYouTube = false;
+      notifyListeners();
+      _skipFailedYouTube();
+      return;
+    }
+    await _loadYouTubeCurrent();
     if (_ytAudioSources[index] != null) {
-      await _loadYouTubeCurrent();
+      _syncCurrentToHandler();
       _position = Duration.zero;
       _player.play();
     }
@@ -855,6 +862,7 @@ class PlayerModel extends ChangeNotifier {
     List<AudioSource?> audioSources,
     int startIndex,
   ) async {
+    _ytQueueGen++;
     _source = TrackSource.youtube;
     _ytQueue = List.of(videos);
     _originalYtQueue = List.of(videos);
@@ -874,6 +882,7 @@ class PlayerModel extends ChangeNotifier {
 
     await _resolveYtSource(startIndex);
     await _loadYouTubeCurrent();
+    if (_ytAudioSources[startIndex] == null) return;
     _position = Duration.zero;
     _player.play();
 
@@ -909,25 +918,27 @@ class PlayerModel extends ChangeNotifier {
     if (_ytSkipInProgress) return;
     _ytSkipInProgress = true;
     _ytConsecutiveFails++;
-    // Si falla 3 seguidas muy rápido, detener para no ciclar infinito (bug reportado: cambia sola)
-    if (_ytConsecutiveFails >= 4) {
-      debugPrint('YouTube: 4 fallos consecutivos, deteniendo auto-skip');
+    if (_ytConsecutiveFails >= 3) {
+      debugPrint('YouTube: 3 fallos consecutivos, deteniendo auto-skip');
       _ytConsecutiveFails = 0;
       _isLoadingYouTube = false;
       _ytSkipInProgress = false;
       notifyListeners();
       return;
     }
+    final gen = _ytQueueGen;
     final idx = _nextYtIndex();
     if (idx >= 0) {
       debugPrint('Saltando canción fallida → siguiente ($idx) intento $_ytConsecutiveFails');
-      Future.delayed(const Duration(milliseconds: 800), () {
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        if (gen != _ytQueueGen) { _ytSkipInProgress = false; return; }
         _ytSkipInProgress = false;
         next();
       });
     } else if (_repeat == PlayerRepeatMode.all) {
       debugPrint('Repetición total, reiniciando cola');
-      Future.delayed(const Duration(milliseconds: 800), () {
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        if (gen != _ytQueueGen) { _ytSkipInProgress = false; return; }
         _ytSkipInProgress = false;
         _ytIndex = 0;
         _loadYouTubeCurrent().then((_) => _player.play());
@@ -1017,19 +1028,27 @@ class PlayerModel extends ChangeNotifier {
 
     if (_source == TrackSource.local) {
       if (_crossfadeEnabled) {
+        // Crossfade manual deshabilitado temporalmente — next instantáneo para estabilidad (799de25)
         final idx = nextQueueIndex;
         if (idx >= 0 && idx < _queue.length) {
-          HapticFeedback.lightImpact();
           _playHistory?.recordPlay(_queue[_currentIndex].id);
-          // Manual crossfade corto 0.6s (spec 300-700ms)
-          _crossfadeTo(_queue[idx], effectiveSecs: 1);
-          return;
+          _currentIndex = idx;
+          await _player.setUrl(_queue[idx].path);
+          _position = Duration.zero;
+          _player.play();
+          _syncCurrentToHandler();
+          _triggerColorExtraction();
+          notifyListeners();
         } else if (_repeat == PlayerRepeatMode.all && _queue.isNotEmpty) {
           _playHistory?.recordPlay(_queue[_currentIndex].id);
-          _crossfadeTo(_queue[0], effectiveSecs: 1);
-          return;
+          _currentIndex = 0;
+          await _player.setUrl(_queue[0].path);
+          _position = Duration.zero;
+          _player.play();
+          _syncCurrentToHandler();
+          _triggerColorExtraction();
+          notifyListeners();
         }
-        notifyListeners();
       } else {
         // Modo normal (sin crossfade): setUrl directo para cambio instantáneo
         final idx = nextQueueIndex;
@@ -1070,15 +1089,22 @@ class PlayerModel extends ChangeNotifier {
         return;
       }
 
+      _ytQueueGen++;
       _isLoadingYouTube = true;
       notifyListeners();
 
       _ytIndex = idx;
       await _resolveYtSource(idx);
 
-      _syncCurrentToHandler();
+      if (_ytAudioSources[idx] == null) {
+        _isLoadingYouTube = false;
+        notifyListeners();
+        _skipFailedYouTube();
+        return;
+      }
+      await _loadYouTubeCurrent();
       if (_ytAudioSources[idx] != null) {
-        await _loadYouTubeCurrent();
+        _syncCurrentToHandler();
         _position = Duration.zero;
         _player.play();
       }
@@ -1104,9 +1130,13 @@ class PlayerModel extends ChangeNotifier {
       if (_crossfadeEnabled) {
         final prevIdx = prevQueueIndex;
         if (prevIdx >= 0 && prevIdx < _queue.length) {
-          HapticFeedback.lightImpact();
-          _crossfadeTo(_queue[prevIdx], effectiveSecs: 1);
-          return;
+          _currentIndex = prevIdx;
+          await _player.setUrl(_queue[prevIdx].path);
+          _position = Duration.zero;
+          _player.play();
+          _syncCurrentToHandler();
+          _triggerColorExtraction();
+          notifyListeners();
         }
       } else {
         // Modo normal (sin crossfade): setUrl directo para cambio instantáneo
