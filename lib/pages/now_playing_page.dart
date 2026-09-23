@@ -483,8 +483,11 @@ class _NowPlayingPageState extends State<NowPlayingPage>
 
     return LayoutBuilder(builder: (ctx, constraints) {
       final h = constraints.maxHeight;
-      // Disco grande y protagónico, player compacto
-      final discSize = h < 400 ? 150.0 : 180.0;
+      final widthLeft = constraints.maxWidth * 5 / 12;
+      final maxByWidth = (widthLeft - 24) / 1.65;
+      final maxByHeight = (h - 62) / 1.1;
+      final desired = h < 400 ? 190.0 : 220.0;
+      final discSize = desired.clamp(0, math.min(maxByWidth, maxByHeight)).toDouble();
 
       return Row(
         children: [
