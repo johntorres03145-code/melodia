@@ -479,40 +479,163 @@ class _NowPlayingPageState extends State<NowPlayingPage>
     YouTubeVideo? ytVideo,
   ) {
     final isYtLoading = player.source == TrackSource.youtube && player.isLoadingYouTube;
+    final hasLyrics = _lyrics != null && _lyrics!.isNotEmpty;
 
-    return Row(
+    return LayoutBuilder(builder: (ctx, constraints) {
+      final h = constraints.maxHeight;
+      // Disco grande y protagónico, player compacto
+      final discSize = h < 400 ? 150.0 : 180.0;
+
+      return Row(
+        children: [
+          // Izquierda: título arriba + disco/portada compacto
+          Expanded(
+            flex: 5,
+            child: Center(
+              child: isYtLoading
+                  ? _skeletonArtwork(theme)
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: _titleAndArtistCompact(context, song, ytVideo, theme),
+                        ),
+                        const SizedBox(height: 12),
+                        _vinylWithSleeve(context, song, ytVideo, theme, discSizeOverride: discSize),
+                      ],
+                    ),
+            ),
+          ),
+          // Derecha: letra con fondo oscuro + progress + controles
+          Expanded(
+            flex: 7,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 16, 12),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: hasLyrics
+                        ? _lyricsPanelLandscape(context, player, theme)
+                        : Container(
+                            decoration: BoxDecoration(
+                              color: MelodiaColors.midnight.withValues(alpha: 0.85),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: theme.effectiveAccent.withValues(alpha: 0.12)),
+                            ),
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.music_note, color: MelodiaColors.textInactive, size: 32),
+                                  const SizedBox(height: 8),
+                                  Text('Sin letra disponible',
+                                      style: TextStyle(color: MelodiaColors.textInactive, fontSize: 13)),
+                                ],
+                              ),
+                            ),
+                          ),
+                  ),
+                  const SizedBox(height: 12),
+                  _progressBar(context, player, theme),
+                  const SizedBox(height: 10),
+                  _controls(context, player, theme),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    });
+  }
+
+  Widget _titleAndArtistCompact(
+      BuildContext context, LocalSong? song, YouTubeVideo? ytVideo, ThemeProvider theme) {
+    final title = song?.title ?? ytVideo?.title ?? 'Sin canción';
+    final artist = song?.artist ?? ytVideo?.channel ?? 'Artista desconocido';
+    return Column(
       children: [
-        Expanded(
-          flex: 5,
-          child: Center(
-            child: isYtLoading
-                ? _skeletonArtwork(theme)
-                : _vinylWithSleeve(context, song, ytVideo, theme),
-          ),
-        ),
-        Expanded(
-          flex: 5,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              isYtLoading
-                  ? _skeletonTitle(theme)
-                  : _titleAndArtist(context, song, ytVideo, theme),
-              const SizedBox(height: 24),
-              _progressBar(context, player, theme),
-              const SizedBox(height: 14),
-              _controls(context, player, theme),
-            ],
-          ),
-        ),
+        Text(title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: -0.3)),
+        const SizedBox(height: 6),
+        Text(artist,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: MelodiaColors.textInactive)),
       ],
+    );
+  }
+
+  Widget _lyricsPanelLandscape(BuildContext context, PlayerModel player, ThemeProvider theme) {
+    final pos = player.position - _lyricSyncOffset;
+    final lyrics = _lyrics!;
+    int activeIdx = 0;
+    for (int i = lyrics.length - 1; i >= 0; i--) {
+      if (pos >= lyrics[i].timestamp) { activeIdx = i; break; }
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_lyricsScrollController.hasClients) {
+        final target = (activeIdx * 25.0) - 80.0;
+        _lyricsScrollController.animateTo(
+          target.clamp(0.0, _lyricsScrollController.position.maxScrollExtent),
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+    return Container(
+      decoration: BoxDecoration(
+        color: MelodiaColors.midnight.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.effectiveAccent.withValues(alpha: 0.10)),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 12)],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 4),
+              child: Text('Letra', style: TextStyle(fontSize: 10, letterSpacing: 1.2, color: MelodiaColors.textInactive)),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: _lyricsScrollController,
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
+                itemCount: lyrics.length,
+                itemBuilder: (ctx, i) {
+                  final isActive = i == activeIdx;
+                  return AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 300),
+                    style: TextStyle(
+                      fontSize: isActive ? 15 : 12,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w400,
+                      color: isActive ? theme.effectiveAccent : MelodiaColors.textInactive,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Text(lyrics[i].text, textAlign: TextAlign.center),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   /// Landscape: funda con imagen + disco que sale al reproducir.
   Widget _vinylWithSleeve(
-      BuildContext context, LocalSong? song, YouTubeVideo? ytVideo, ThemeProvider theme) {
-    final discSize = 200.0;
+      BuildContext context, LocalSong? song, YouTubeVideo? ytVideo, ThemeProvider theme,
+      {double? discSizeOverride}) {
+    final discSize = discSizeOverride ?? 200.0;
     final sleeveSize = discSize * 1.1;
     final slideOut = discSize * 0.55; // cuánto sale el disco al reproducir
 

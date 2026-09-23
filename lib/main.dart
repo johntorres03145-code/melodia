@@ -81,7 +81,7 @@ Future<void> main() async {
       androidNotificationChannelId: 'com.melodia.channel.audio',
       androidNotificationChannelName: 'Reproducción',
       androidNotificationOngoing: true,
-      androidStopForegroundOnPause: false,
+      androidStopForegroundOnPause: true,
     ),
   );
   playerModel.attachHandler(audioHandler);
