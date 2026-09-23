@@ -5,7 +5,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 /// Guarda URLs con timestamp para saber si expiraron (~6 horas).
 class YtUrlCache {
   static const String _boxName = 'yt_audio_urls';
-  static const Duration _ttl = Duration(hours: 1);
+  static const Duration _ttl = Duration(hours: 5);
 
   late Box<Map> _box;
 

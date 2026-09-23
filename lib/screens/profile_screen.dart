@@ -389,8 +389,51 @@ class ProfileScreen extends StatelessWidget {
   }
 
   Widget _crossfadeSettings(BuildContext context, ThemeProvider theme) {
-    // Crossfade deshabilitado temporalmente — se reemplazará por gapless sin pausas
     return const SizedBox.shrink();
+    // ignore: dead_code
+    final player = context.read<PlayerModel>();
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Crossfade',
+                style: TextStyle(
+                    fontSize: 14, color: MelodiaColors.textColor(theme.isDarkMode)),
+              ),
+            ),
+            Switch(
+              value: theme.crossfadeEnabled,
+              onChanged: (v) {
+                theme.setCrossfadeEnabled(v);
+                player.setCrossfadeEnabled(v, theme.crossfadeDuration);
+              },
+              activeTrackColor: Theme.of(context).colorScheme.surface,
+            ),
+          ],
+        ),
+        if (theme.crossfadeEnabled) ...[
+          const SizedBox(height: 10),
+          Text(
+            'Duración: ${theme.crossfadeDuration}s',
+            style: const TextStyle(fontSize: 13, color: MelodiaColors.textSecondary),
+          ),
+          Slider(
+            value: theme.crossfadeDuration.toDouble(),
+            min: 2,
+            max: 12,
+            divisions: 10,
+            activeColor: theme.effectiveAccent,
+            inactiveColor: theme.effectiveAccent.withValues(alpha: 0.15),
+            onChanged: (v) {
+              theme.setCrossfadeDuration(v.round());
+              player.setCrossfadeDuration(v.round());
+            },
+          ),
+        ],
+      ],
+    );
   }
 
   Widget _hiddenSongsEntry(BuildContext context, ThemeProvider theme) {

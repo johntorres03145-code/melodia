@@ -40,8 +40,8 @@ class MusicLibrary {
         albumId,
         ArtworkType.ALBUM,
         format: ArtworkFormat.JPEG,
-        size: 300,
-        quality: 85,
+        size: 800,
+        quality: 100,
       );
     } catch (_) {
       return null;
@@ -55,8 +55,8 @@ class MusicLibrary {
         songId,
         ArtworkType.AUDIO,
         format: ArtworkFormat.JPEG,
-        size: 300,
-        quality: 85,
+        size: 800,
+        quality: 100,
       );
     } catch (_) {
       return null;
