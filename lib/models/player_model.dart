@@ -916,6 +916,13 @@ class PlayerModel extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    // No auto-skip: el usuario debe dar siguiente manualmente (evita "pasa sola" en largas)
+    debugPrint('YouTube: no se pudo reproducir, esperando acción manual (intento $_ytConsecutiveFails)');
+    _isLoadingYouTube = false;
+    _ytSkipInProgress = false;
+    notifyListeners();
+    return;
+    // ignore: dead_code
     final idx = _nextYtIndex();
     if (idx >= 0) {
       debugPrint('Saltando canción fallida → siguiente ($idx) intento $_ytConsecutiveFails');
